@@ -1,0 +1,40 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            // This debugs programs compiled with Linux clang.
+            // You can only run this configuration when vscode is remoted into linux fileystem.
+            "name": "Debug from linux",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/dedbg",
+            "env": {"LD_LIBRARY_PATH": "build"},
+            "args": ["build/test"],
+            "cwd": "${workspaceFolder}",
+            "terminal": "integrated"
+        },
+        {
+            // This debugs programs compiled with Linux clang.
+            // You can only run this configuration when vscode is remoted into linux fileystem.
+            "name": "Debug from linux (build/test)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/test",
+            "cwd": "${workspaceFolder}",
+            "stopOnEntry": true,
+            //"stopOnEntry": true,
+        },
+        {
+            // This debugs programs compiled with clang.exe (and probably MSVC).
+            // You can only run this configuration when vscode isn't remoted into linux fileystem.
+            "name": "Debug from windows",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/dedbg",
+            "symbolSearchPath": "${workspaceFolder}/code",
+            "console": false,
+            "visualizerFile": "${workspaceFolder}/my.natvis",
+        }
+    ],
+}
