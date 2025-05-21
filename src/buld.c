@@ -30,9 +30,13 @@ int main(int ArgCount, char **Args) {
     IncrementalRunCommand(NeedsCompile, CompileCommand, CppObjects, CppSources); 
 }
 
+// main1: main.o file1.o library.dll 
+// library: obj1.o obj2.o obj3.o
+
+
 int main(int ArgCount, char **Args) {
 
-    file_array CppSources = Source(
+    target CppSources = Source(
         "sample/main1.cpp", 
         "sample/file1.cpp"
     );
@@ -40,8 +44,9 @@ int main(int ArgCount, char **Args) {
     string LinkCommand = "clang++ -o {Out} -fsantize-address {In}";
     string CompileCommand = "clang++ -o {Out} -Md -O0 -c {In}";
 
-    target Target = TwoStageTarget((stage){ In = CppSources, Out = "build/%.o", Command = CompileCommand },
-                                   (stage){ In = STAGE_PREV, Out = "build/main1", LinkCommand);
+    target Objects = Target((target){ In = CppSources, Out = "build/*.o", Command = CompileCommand });
+
+    target Program = Target((target){ In = Objects, Out = "build/main1", LinkCommand);
                            
-    IncrementalRunCommand(Target);
+    BuildTarget(Program);
 }
