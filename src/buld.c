@@ -36,17 +36,22 @@ int main(int ArgCount, char **Args) {
 
 int main(int ArgCount, char **Args) {
 
-    target CppSources = Source(
+    target_list CppSources = TargetList((target_list){0}
         "sample/main1.cpp", 
         "sample/file1.cpp"
     );
 
+    string_array ObjectFilesList = FindReplace(CppSources, "sample/%.cpp", "build/%.o");
+
     string LinkCommand = "clang++ -o {Out} -fsantize-address {In}";
     string CompileCommand = "clang++ -o {Out} -Md -O0 -c {In}";
 
-    target Objects = Target((target){ In = CppSources, Out = "build/*.o", Command = CompileCommand });
+    //target_list Objects = TargetList{ .In = CppSources, Out = ObjectFilesList, Command = CompileCommand };
+    target_list Objects = TargetList(CppSources, ObjectFilesList, CompileCommand);
 
-    target Program = Target((target){ In = Objects, Out = "build/main1", LinkCommand);
+    //target_list Program = TargetList{ .In = Objects, Out = StrArr("build/main1"), Command = LinkCommand };
+    target_list Program = TargetList(Objects, StrArr("build/main1"), LinkCommand);
                            
-    BuildTarget(Program);
+    BuildTarget(Program.Data[0]);
 }
+
