@@ -1,1 +1,29 @@
-[]
+[
+  {
+    "arguments": [
+      "/usr/bin/clang++",
+      "-g",
+      "-std=c++20",
+      "-fsanitize=address",
+      "-Wall",
+      "-pedantic-errors",
+      "-Wno-unused-variable",
+      "-Wno-gnu-anonymous-struct",
+      "-Wno-writable-strings",
+      "-Wno-nested-anon-types",
+      "-Wno-gnu-zero-variadic-macro-arguments",
+      "-Wno-missing-braces",
+      "-fno-strict-aliasing",
+      "-Wno-unused-function",
+      "-Wno-language-extension-token",
+      "-fdiagnostics-absolute-paths",
+      "-c",
+      "-o",
+      "build/buld.o",
+      "src/buld.cpp"
+    ],
+    "directory": "/home/mac/buld",
+    "file": "/home/mac/buld/src/buld.cpp",
+    "output": "/home/mac/buld/build/buld.o"
+  }
+]
