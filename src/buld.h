@@ -13,6 +13,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <unistd.h>
+#include <sys/wait.h> 
 
 //-----------------------------------------------------------------------------
 // Base layer
@@ -55,17 +57,25 @@ typedef struct {
 
 typedef array(string) string_list;
 
-#define Str(String) (string){.Str = ((u8 *)(String)), .Length = (sizeof(String)-1)}
+typedef array(u8 *) zstring_list;
+
+#define Str(String) string{(sizeof(String)-1), (u8 *)String }
 #define Strval(String) (int)((String).Length), (String).Str
 
-// Is this allowed?
-#define StrArr(String) ((string_array){ .Data = &Str(String), .Count = 1, .Capacity = 0 })
-
 string String(u8 *Str, u64 Length) {
-    return (string) { .Str = Str, .Length = Length };
+    return { Length, Str };
+}
+string SubstrRange(string String, u64 First, u64 OnePastLast) {
+    assert(OnePastLast >= First);
+    First = Min(First, String.Length);
+    OnePastLast = Min(OnePastLast, String.Length);
+    
+    String.Str += First;
+    String.Length = OnePastLast - First;
+    return String;
 }
 string CString(u8 *ZString) {
-    return (string) { .Str = ZString, .Length = strlen((char *)ZString) };
+    return { strlen((char *)ZString), (u8 *)ZString };
 }
 
 u64 StringRFind(string String, u8 Char) {
@@ -100,6 +110,11 @@ string_list FindReplace(string_list Strings, string FindPattern, string ReplaceP
     string_list Result = {0};
     assert(0);
     return Result;
+}
+
+void CopyString(u8 *Buffer, string String) {
+    memcpy(Buffer, String.Str, String.Length);
+    Buffer[String.Length] = 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -163,8 +178,121 @@ string_list OS_ReadDir(string Path) {
     return DirContents;
 }
 
-s32 OS_RunCommand(string Command, string Out, string_list In) {
-    return 0;
+struct arg_parser {
+    u64 At;
+    string String;
+    bool Error;
+};
+
+string GetArg(arg_parser *Parser) {
+    u8 QuoteChar = 0;
+    u64 Start = Parser->String.Length;
+    u64 End = Parser->String.Length;
+    for (; Parser->At < Parser->String.Length; Parser->At += 1) {
+        u8 C = Parser->String.Str[Parser->At];
+        if (C != ' ') {
+            Start = Parser->At;
+            if (C == '\'' || C == '"') {
+                QuoteChar = C;
+                Parser->At += 1;
+            }
+            break;
+        }
+    }
+
+    bool QuotesClosed = (QuoteChar == 0);
+    for (; Parser->At < Parser->String.Length; Parser->At += 1) {
+        u8 C = Parser->String.Str[Parser->At];
+        if (QuoteChar) {
+            // TODO: Handle escaping
+            if (C == QuoteChar) {
+                Parser->At += 1;
+                End = Parser->At;
+                QuotesClosed = true;
+                break;
+            }
+        }
+        else if (C == ' ') {
+            End = Parser->At;
+            break;
+        }
+    }
+
+    if (!QuotesClosed) {
+        Parser->Error = true;
+    }
+
+    return SubstrRange(Parser->String, Start, End);
+}
+
+s32 OS_RunCommand(string Command, string Out, string In) {
+    s32 ReturnCode = -1;
+
+    u8 ZCommand[4096];
+    CopyString(ZCommand, Command);
+
+    zstring_list Argv = {};
+    arg_parser Parser = {};
+    Parser.String = Command;
+    string Program = GetArg(&Parser);
+    if (Parser.Error || Program.Length == 0) {
+        fprintf(stderr, "Error with command %.*s\n", Strval(Command));
+        return -1;
+    }
+
+    u8 *ZProgram = (u8 *)calloc(Program.Length + 1, 1);
+    CopyString(ZProgram, Program);
+
+    ArrayAdd(&Argv, ZProgram);
+
+    while (!Parser.Error) {
+        string Arg = GetArg(&Parser);
+        if (Arg.Length == 0) {
+            break;
+        }
+
+        u8 *ZArg = (u8 *)calloc(Arg.Length + 1, 1);
+        CopyString(ZArg, Arg);
+        ArrayAdd(&Argv, ZArg);
+    }
+
+    ArrayAdd(&Argv, (u8 *)0);
+
+    pid_t PID = fork();
+    if (PID == -1) {
+    }
+    else if (PID == 0) {
+
+        if (Parser.Error) {
+            fprintf(stderr, "Error parsing command %.*s\n", Strval(Command));
+            return -1;
+        }
+
+        if (execvp((char *)ZProgram, (char **)Argv.Data) < 0) {
+            fprintf(stderr, "Child failed to exec()\n");
+            exit(1);
+        }
+    }
+    else {
+        int ChildStatus = 0;
+        int WaitResult = waitpid(PID, &ChildStatus, 0);
+        if (WaitResult == -1) {
+            // TODO: Handle failure of this, this might mean handling SIGCHLD in some way.
+        }
+        else {
+            if (WIFEXITED(ChildStatus)) {
+                int ExitStatus = WEXITSTATUS(ChildStatus);
+                ReturnCode = ExitStatus;
+            }
+            else if (WIFSIGNALED(ChildStatus)) {
+                // TODO Signal names
+                int Signal = WTERMSIG(ChildStatus);
+                fprintf(stdout, "Program %.*s signalled (%d)\n", Strval(Program), Signal);
+            }
+        }
+    }
+
+    return ReturnCode;
 }
 
 //-----------------------------------------------------------------------------
@@ -179,7 +307,10 @@ typedef struct target {
     target_list Prereqs;
     string Name;
     bool NeedsRebuild;
+    bool Exists;
     s64 ModTime; 
+    string Error;
+    string Command;
 } target;
 
 string_list ToStringList(target_list TargetList) {
@@ -190,6 +321,23 @@ string_list ToStringList(target_list TargetList) {
     return StringList;
 }
 
+string ToString(string_list StringList, u8 Separator) {
+    u64 Length = 0;
+    for (u64 i = 0; i < StringList.Count; i += 1) {
+        Length += StringList.Data[i].Length;
+    }
+    u8 *Buffer = (u8 *)calloc(1, Length);
+    u64 At = 0;
+    for (u64 i = 0; i < StringList.Count; i += 1) {
+        string S = StringList.Data[i];
+        memcpy(Buffer + At, S.Str, S.Length);
+        At += S.Length;
+    }
+
+    return String(Buffer, Length);
+}
+
+#if 0
 target_list Sources(string_list Names) {
     target_list TargetList = {0};
     for (u64 i = 0; i < Names.Count; i += 1) {
@@ -286,97 +434,121 @@ target *TargetIterNext(target *It, target_list *TargetList) {
 
     return Result;
 }
+#endif
 
 
 
-#if 0
+
 // TODO: Its probably better to first just recurse to leaf nodes, then check if then need 
 // to be rebuilt and scan upwards. 
 // This wastes work attempting to check root nodes against intermediate nodes times, when
 // a changed leaf node would have forced a rebuild anyway.
-bool BuildTarget2(target Target) {
+bool BuildTarget(target *Target) {
 
-    string OutPath = Target.Out;
-    file_info OutFileInfo = GetFileInfo(OutPath);
-    if (!OutFileInfo.Ok) {
-        fprintf("Unable to stat file %.*s\n", Strval(OutPath));
+    if (Target->Error.Length) {
+        fprintf(stderr, "Error: %.*s\n", Strval(Target->Error));
         return false;
     }
 
-    if (!OutFileInfo.Exists && Target.In.Count == 0) {
-        // We could make this always run command and reutn true
-        fprintf(stderr, "Unable to find file %.*s\n", Strval(Target.Out));
+    if (Target->Prereqs.Count == 0 && !Target->Exists) {
+        fprintf(stdout, "Error: File %.*s does not exist\n", Strval(Target->Name));
         return false;
     }
 
-    s64 OutModTime = (OutFileInfo.Exists) ? OutFileInfo.ModTime : INT64_MIN;
-
-    bool TargetNeedsBuild = !OutFileInfo.Exists;
-    for (u64 i = 0; i < Target.In.Count; i += 1) {
-        target InTarget Target.In.Data[i];
-        string InPath = InTarget.Out;
-        file_info InFileInfo = GetFileInfo(InPath);
-        if (!InFileInfo.Ok) {
-            fprintf("Unable to stat file %.*s\n", Strval(InPath));
+    bool PrereqsUpToDate = true;
+    bool TargetUpToDate = Target->Exists;
+    for (u64 i = 0; i < Target->Prereqs.Count; i += 1) {
+        target *Prereq = Target->Prereqs.Data + i;
+        bool PrereqUpToDate = BuildTarget(Prereq);
+        if (PrereqUpToDate) {
+            if (Prereq->ModTime > Target->ModTime) {
+                TargetUpToDate = false;
+            }
         }
-
-        s64 InModTime = InFileInfo.ModTime;
-
-        if (!InFileInfo.Exists || InModTime > OutModTime) {
-            TargetNeedsBuild  = true;
-        }
-
-        // TODO: Pass through InTarget Timestamp to avoid re-querying
-        bool RebuiltInTarget = BuildTarget2(InTarget);
-        if (RebuiltInTarget) {
-            TargetNeedsBuild = true;
+        else {
+            TargetUpToDate = false;
+            PrereqsUpToDate = false;
+            break;
         }
     }
-     
 
-    if (TargetNeedsBuild) {
-        RunCommand(Target.Command);
+    // Could also add list of (target, prereqs) and return that to user
+    if (PrereqsUpToDate && !TargetUpToDate && Target->Command.Length) {
+        string_list PrereqsList = ToStringList(Target->Prereqs);
+        string PrereqsString = ToString(PrereqsList, ' ');
+        s32 ReturnCode = OS_RunCommand(Target->Command, Target->Name, PrereqsString); 
+
+        if (ReturnCode != 0) {
+            TargetUpToDate = false;
+        }
     }
 
-    return Rebuilt;
+    return TargetUpToDate;
 }
 
-target Target(target In, string InPattern, string OutPattern, string Command) {
-    return (target){0};
+bool CheckOk(target Target) {
+    if (Target.Error.Length) {
+        fprintf(stderr, "Error: %.*s\n", Strval(Target.Error));
+        return false;
+    }
+
+    if (Target.Prereqs.Count == 0 && !Target.Exists) {
+        fprintf(stdout, "Error: File %.*s does not exist\n", Strval(Target.Name));
+        return false;
+    }
+
+
+    for (u64 i = 0; i < Target.Prereqs.Count; i += 1) {
+        target *Prereq = Target.Prereqs.Data + i;
+        bool Ok = CheckOk(*Prereq);
+        if (!Ok) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
-// 1 out < 0 in (leaf node)
-// 1 out < 1 in
-// 1 out <- many in 
-// many out < many in
-// many out <- 1 in
+target Target(string Name, target_list Prereqs, string Command) {
+    os_file_info FileInfo = OS_GetFileInfo(Name);
+    // TODO: Better error message
+    string Error = (!FileInfo.Ok) ? Str("Unable to stat file") : Str("");
 
-target_list TargetList(target_list In, string_list Out, string Command) {
+    target Target = {};
+    Target.Name = Name;
+    Target.Prereqs = Prereqs;
+    Target.Command = Command;
+    Target.ModTime = FileInfo.ModTime;
+    Target.Exists = FileInfo.Exists;
+    Target.NeedsRebuild = false;
+    Target.Error = Error;
+    return Target;
+}
+
+target_list TargetList(string_list Targets, target_list Prereqs, string Command) {
     target_list TargetList = {0};
-    if (In.Count == 0) {
+    if (Prereqs.Count == 0) {
         // leaf node e.g. source file
-
-        for (u64 i = 0; i < Out.Count; i += 1) {
-            // 1 out < 1 in
-            target T = { .In = {0}, .Out = Out.Data[i], .Command = Command };
-            ArrayAdd(&TargetLIst, T);
+        for (u64 i = 0; i < Targets.Count; i += 1) {
+            target T = Target(Targets.Data[i], Prereqs, Command);
+            ArrayAdd(&TargetList, T);
         }
     }
-    else if (Out.Count == 1) {
+    else if (Targets.Count == 1) {
         // 1 out < 1 in
         // 1 out <- many in 
-        target T = { .In = In, .Out = Out.Data[i], .Command = Command };
+        target T = Target(Targets.Data[0], Prereqs, Command);
         ArrayAdd(&TargetList, T);
     }
     else {
-        assert(In.Count == Out.Count);
+        assert(Targets.Count == Prereqs.Count);
 
         // many out < many in
-        for (u64 i = 0; i < In.Count; i += 1) {
+        for (u64 i = 0; i < Targets.Count; i += 1) {
             // 1 out < 1 in
-            target_list OneIn = {0};
-            ArrayAdd(&OneIn, In.Data[i]);
-            target T = { .In = OneIn, .Out = Out.Data[i], .Command = Command };
+            target_list OnePrereq = {};
+            ArrayAdd(&OnePrereq, Prereqs.Data[i]);
+            target T = Target(Targets.Data[i], OnePrereq, Command);
             ArrayAdd(&TargetList, T);
         }
     }
@@ -384,6 +556,5 @@ target_list TargetList(target_list In, string_list Out, string Command) {
     return TargetList;
 }
 
-#endif
 
 
