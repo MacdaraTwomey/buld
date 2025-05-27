@@ -32,6 +32,12 @@ typedef int64_t  s64;
 #define Min(a, b) (((a) < (b)) ? (a) : (b))
 #define Max(a, b) (((a) > (b)) ? (a) : (b))
 
+template <typename T, size_t n>
+constexpr size_t ArrayCount(T(&)[n])
+{
+        return n;
+}
+
 #define array(Type) struct { Type *Data; u64 Capacity; u64 Count; }
 
 #define ArrayAdd(Array, Element) ( \
@@ -65,6 +71,19 @@ typedef array(u8 *) zstring_list;
 string String(u8 *Str, u64 Length) {
     return { Length, Str };
 }
+
+string StringPrefix(string String, u64 Length) {
+    String.Length = Min(Length, String.Length);
+    return String;
+}
+
+string StringSkip(string String, u64 Length) {
+    u64 SkipLength = Min(Length, String.Length);
+    String.Length -= SkipLength;
+    String.Str += SkipLength; 
+    return String;
+}
+
 string SubstrRange(string String, u64 First, u64 OnePastLast) {
     assert(OnePastLast >= First);
     First = Min(First, String.Length);
@@ -102,20 +121,118 @@ u64 StringFind(string String, u8 Char) {
     return Index;
 }
 
+u64 StringFindStr(string Haystack, string Needle, u64 Start = 0);
+
+u64 StringFindStr(string Haystack, string Needle, u64 Start) {
+    Start = Min(Start, Haystack.Length);
+    u64 Position = Haystack.Length;
+
+    if (Needle.Length > 0 && Haystack.Length >= Needle.Length) {
+        for (u64 i = Start; i < Haystack.Length - Needle.Length + 1; ++i) {
+            if (Needle.Str[0] == Haystack.Str[i]) {
+                bool Found = true;
+                for (u64 j = 1; j < Needle.Length; ++j) {
+                    if (Needle.Str[j] != Haystack.Str[i + j]) {
+                        Found = false;
+                        break;
+                    }
+                }
+
+                if (Found) {
+                    Position = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    return Position;
+}
+
 string PathGetDir(string Path) {
     return String(Path.Str, StringRFind(Path, '/'));
 }
 
-string_list FindReplace(string_list Strings, string FindPattern, string ReplacePattern) {
-    string_list Result = {0};
-    assert(0);
+template<typename... ts>
+string StringConcat(ts... Args)
+{
+    string Strings[] = {string{}, Args...};
+
+    u64 Length = 0;
+    for (u64 i = 1; i < ArrayCount(Strings); ++i)
+    {
+        Length += Strings[i].Length;
+    }
+
+    u64 CopiedLength = 0;
+    u8 *StringMemory = (u8 *)calloc(Length, 1);
+    for (u64 i = 1; i < ArrayCount(Strings); ++i)
+    {
+        if (Length > 0)
+        {
+            memcpy(StringMemory + CopiedLength, Strings[i].Str, Strings[i].Length);
+            CopiedLength += Strings[i].Length;
+        }
+    }
+
+    return String(StringMemory, CopiedLength);
+}
+
+
+string FindReplace(string String, string FindPattern, string ReplacePattern, string MatchPattern) {
+    u64 FindWildcardCharIndex = StringFindStr(FindPattern, MatchPattern);
+    string FindPrefix = FindPattern;
+    string FindSuffix = {};
+    if (FindWildcardCharIndex < FindPattern.Length) {
+        FindPrefix = StringPrefix(FindPattern, FindWildcardCharIndex);
+        FindSuffix = StringSkip(FindPattern, FindWildcardCharIndex+1);
+    }
+
+    u64 ReplaceWildcardCharIndex = StringFindStr(ReplacePattern, MatchPattern);
+    string ReplacePrefix = ReplacePattern;
+    string ReplaceSuffix = {};
+    if (ReplaceWildcardCharIndex < ReplacePattern.Length) {
+        ReplacePrefix = StringPrefix(ReplacePattern, ReplaceWildcardCharIndex);
+        ReplaceSuffix = StringSkip(ReplacePattern, ReplaceWildcardCharIndex+1);
+    }
+
+    //                     v   v   v
+    //            012345678901234567890
+    // string:    projects/src/main.c
+    // pattern:   src/%.c
+    // findpref:  src/
+    // findsuff:  .c
+    u64 BeforeMatchLength = 0;
+    u64 PrefixIndex = StringFindStr(String, FindPrefix);
+    if (PrefixIndex < String.Length) {
+        BeforeMatchLength = PrefixIndex + FindPrefix.Length;
+    }
+
+    u64 SuffixIndex = StringFindStr(String, FindSuffix, BeforeMatchLength);
+
+    string Match = SubstrRange(String, BeforeMatchLength, SuffixIndex);
+
+    string Result = StringConcat(ReplacePrefix, Match, ReplaceSuffix);
+
     return Result;
+}
+
+string_list FindReplaceList(string_list Strings, string FindPattern, string ReplacePattern) {
+    string_list ReplacementStrings = {};
+    for (u64 i = 0; i < Strings.Count; i += 1) {
+        string String = Strings.Data[i];
+        string Replacement = FindReplace(String, FindPattern, ReplacePattern, Str("%"));
+        ArrayAdd(&ReplacementStrings, Replacement);
+    }
+
+    return ReplacementStrings;
 }
 
 void CopyString(u8 *Buffer, string String) {
     memcpy(Buffer, String.Str, String.Length);
     Buffer[String.Length] = 0;
 }
+
 
 //-----------------------------------------------------------------------------
 // OS
@@ -287,7 +404,7 @@ s32 OS_RunCommand(string Command, string Out, string In) {
             else if (WIFSIGNALED(ChildStatus)) {
                 // TODO Signal names
                 int Signal = WTERMSIG(ChildStatus);
-                fprintf(stdout, "Program %.*s signalled (%d)\n", Strval(Program), Signal);
+                fprintf(stdout, "Program %.*s signalled %d (%s)\n", Strval(Program), Signal, strsignal(Signal));
             }
         }
     }
@@ -476,6 +593,9 @@ bool BuildTarget(target *Target) {
     if (PrereqsUpToDate && !TargetUpToDate && Target->Command.Length) {
         string_list PrereqsList = ToStringList(Target->Prereqs);
         string PrereqsString = ToString(PrereqsList, ' ');
+
+
+        fprintf(stdout, "Command: '%.*s'\n", Strval(Target->Command));
         s32 ReturnCode = OS_RunCommand(Target->Command, Target->Name, PrereqsString); 
 
         if (ReturnCode != 0) {

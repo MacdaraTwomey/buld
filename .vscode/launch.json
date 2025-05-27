@@ -8,8 +8,7 @@
             "name": "Debug from linux",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/build/dedbg",
-            "env": {"LD_LIBRARY_PATH": "build"},
+            "program": "${workspaceFolder}/build/buld",
             "args": ["build/test"],
             "cwd": "${workspaceFolder}",
             "terminal": "integrated"
@@ -31,7 +30,7 @@
             "name": "Debug from windows",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/dedbg",
+            "program": "${workspaceFolder}/build/buld",
             "symbolSearchPath": "${workspaceFolder}/code",
             "console": false,
             "visualizerFile": "${workspaceFolder}/my.natvis",

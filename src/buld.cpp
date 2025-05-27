@@ -15,10 +15,11 @@ int main(int ArgCount, char **Args) {
     ArrayAdd(&CppFiles, Str("sample/file1.cpp"));
     target_list CppSources = TargetList(CppFiles, {}, {});
 
-    string_list ObjectFilesList = FindReplace(CppFiles, Str("sample/%.cpp"), Str("build/%.o"));
+    string_list ObjectFilesList = FindReplaceList(CppFiles, Str("sample/%.cpp"), Str("build/%.o"));
 
+    // TODO: Mkdir missing build output directories (when?)
     string LinkCommand = Str("clang++ -o {Out} -fsantize-address {In}");
-    string CompileCommand = Str("clang++ -o {Out} -Md -O0 -c {In}");
+    string CompileCommand = Str("clang++ -o {Out} -O0 -c {In}");
 
     target_list Objects = TargetList(ObjectFilesList, CppSources, CompileCommand);
     target Program = Target(Str("build/main1"), Objects, LinkCommand);
