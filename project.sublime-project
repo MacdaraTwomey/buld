@@ -1,0 +1,38 @@
+{
+    "folders":
+    [
+        {
+            "path": ".",
+            "folder_exclude_patterns": [
+                "target/",
+            ],
+            /*"file_exclusion_patterns": [
+                "*.sublime-workspace",
+            ],*/
+            //"follow_symlinks": true
+        },
+    ],
+    "settings":
+    {
+        
+    },
+    "build_systems":
+    [
+        {
+            "name": "build-system1",
+            "variants": [
+                {
+                    "name": "compile",
+                    //"shell_cmd": "bash.exe make.sh",
+                    "cmd": "bash.exe /home/mac/projects/buld/build.sh linux network-path",
+                    // Stupid regex in json needs double escaping for \ path separators
+                    "file_regex": "^(.*):(\\d+):(\\d+): (.*)$",
+                },
+                {
+                    "name": "run",
+                    "cmd": "bash.exe -c /home/mac/projects/buld/target/buld",
+                }
+            ],
+        }
+    ],
+}

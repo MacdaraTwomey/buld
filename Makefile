@@ -12,7 +12,7 @@ everything: build/buld
 clean: 
 	rm -rf build
 
-CC_FLAGS := -g -std=c++20 -fsanitize=address -MD -Wall -pedantic-errors \
+CC_FLAGS := -g -std=c++20 -fsanitize=address,undefined -MD -Wall -pedantic-errors \
 	-Wno-unused-variable -Wno-gnu-anonymous-struct -Wno-writable-strings \
 	-Wno-nested-anon-types -Wno-gnu-zero-variadic-macro-arguments	-Wno-missing-braces \
 	-fno-strict-aliasing -Wno-unused-function -Wno-language-extension-token \
@@ -20,7 +20,7 @@ CC_FLAGS := -g -std=c++20 -fsanitize=address -MD -Wall -pedantic-errors \
 
 CC_FLAGS += -fdiagnostics-absolute-paths
 
-LINK_FLAGS := -fsanitize=address -fuse-ld=lld 
+LINK_FLAGS := -fsanitize=address,undefined -fuse-ld=ld 
 
 
 INC := 

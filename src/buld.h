@@ -32,6 +32,13 @@ typedef int64_t  s64;
 #define Min(a, b) (((a) < (b)) ? (a) : (b))
 #define Max(a, b) (((a) > (b)) ? (a) : (b))
 
+void *AllocSize(u64 Size) {
+    return calloc(Size, 1);
+}
+
+#define PushArray(Count, Type) ((Type *)AllocSize((Count) * sizeof(Type)))
+#define PushStruct(Type) ((Type *)AllocSize(sizeof(Type)))
+
 template <typename T, size_t n>
 constexpr size_t ArrayCount(T(&)[n])
 {
@@ -56,10 +63,22 @@ void *ArrayExpand(void **Data, u64 *Capacity, u32 ElementSize) {
     return *Data;
 }
 
-typedef struct {
+struct string {
     u64 Length;
     u8 *Str;
-} string;
+    string() = default;
+    string(u64 Len, u8 *String) {
+        Length = Len;
+        Str = String;
+    }
+    string(const char *String) {
+        Length = strlen(String);
+        Str = (u8 *)String;
+    }
+};
+
+#define StrArg(String) ((int)((String).Length)), ((String).Str)
+
 
 typedef array(string) string_list;
 
@@ -68,8 +87,12 @@ typedef array(u8 *) zstring_list;
 #define Str(String) string{(sizeof(String)-1), (u8 *)String }
 #define Strval(String) (int)((String).Length), (String).Str
 
-string String(u8 *Str, u64 Length) {
+string CreateString(u8 *Str, u64 Length) {
     return { Length, Str };
+}
+
+string CreateString(char *Str) {
+    return { strlen(Str), (u8 *)Str };
 }
 
 string StringPrefix(string String, u64 Length) {
@@ -93,8 +116,19 @@ string SubstrRange(string String, u64 First, u64 OnePastLast) {
     String.Length = OnePastLast - First;
     return String;
 }
-string CString(u8 *ZString) {
-    return { strlen((char *)ZString), (u8 *)ZString };
+
+bool StringMatch(string A, string B) {
+    bool Match = A.Length == B.Length;
+    if (Match) {
+        for (u64 i = 0; i < A.Length; i += 1) {
+            if (A.Str[i] != B.Str[i]) {
+                Match = false;
+                break;
+            }
+        }
+    }
+
+    return Match;
 }
 
 u64 StringRFind(string String, u8 Char) {
@@ -109,9 +143,10 @@ u64 StringRFind(string String, u8 Char) {
     return Index;
 }
 
-u64 StringFind(string String, u8 Char) {
+u64 StringFind(string String, u8 Char, u64 Start = 0);
+u64 StringFind(string String, u8 Char, u64 Start) {
     u64 Index = String.Length;
-    for (u64 i = 0; i < String.Length; i += 1) {
+    for (u64 i = Start; i < String.Length; i += 1) {
         if (String.Str[i] == Char) {
             Index = i;
             break;
@@ -150,7 +185,7 @@ u64 StringFindStr(string Haystack, string Needle, u64 Start) {
 }
 
 string PathGetDir(string Path) {
-    return String(Path.Str, StringRFind(Path, '/'));
+    return CreateString(Path.Str, StringRFind(Path, '/'));
 }
 
 template<typename... ts>
@@ -175,9 +210,74 @@ string StringConcat(ts... Args)
         }
     }
 
-    return String(StringMemory, CopiedLength);
+    return CreateString(StringMemory, CopiedLength);
 }
 
+struct string_node
+{
+    string String;
+    string_node *Next;
+};
+
+struct s_list
+{
+    string_node *Head;
+    string_node *Tail;
+    u64 Length;
+    u64 Count;
+};
+
+void StringListAppend(s_list *List, string String)
+{
+    string_node *Node = PushStruct(string_node);
+    Node->String = String;
+    Node->Next = nullptr;
+
+    if (List->Head == nullptr)
+    {
+        List->Head = Node;
+    }
+    else
+    {
+        List->Tail->Next = Node;
+    }
+
+    List->Tail = Node;
+    List->Length += String.Length;
+    List->Count += 1;
+}
+
+void StringListAppend(s_list *List, char *String)
+{
+    StringListAppend(List, CreateString(String));
+}
+
+string StringListJoin(s_list *List)
+{
+    u8 *StringMemory = PushArray(List->Length, u8);
+
+    u64 CopiedLength = 0;
+    for (string_node *Node = List->Head; Node; Node = Node->Next)
+    {
+        if (Node->String.Length > 0)
+        {
+            memcpy(StringMemory + CopiedLength, Node->String.Str, Node->String.Length);
+            CopiedLength += Node->String.Length;
+        }
+    }
+
+    return CreateString(StringMemory, CopiedLength);
+}
+
+string FindReplace(string String, string MatchString, string ReplaceString) {
+    u64 Index = StringFindStr(String, MatchString);
+    string Before = StringPrefix(String, Index);
+    string After = StringSkip(String, Index + MatchString.Length);
+    string Result = StringConcat(Before, ReplaceString, After);
+    return Result;
+}
+
+#if 0
 
 string FindReplace(string String, string FindPattern, string ReplacePattern, string MatchPattern) {
     u64 FindWildcardCharIndex = StringFindStr(FindPattern, MatchPattern);
@@ -227,12 +327,14 @@ string_list FindReplaceList(string_list Strings, string FindPattern, string Repl
 
     return ReplacementStrings;
 }
+#endif
 
 void CopyString(u8 *Buffer, string String) {
     memcpy(Buffer, String.Str, String.Length);
     Buffer[String.Length] = 0;
 }
 
+#if 0
 
 //-----------------------------------------------------------------------------
 // OS
@@ -342,7 +444,7 @@ string GetArg(arg_parser *Parser) {
     return SubstrRange(Parser->String, Start, End);
 }
 
-s32 OS_RunCommand(string Command, string Out, string In) {
+s32 OS_RunCommand(string Command) {
     s32 ReturnCode = -1;
 
     u8 ZCommand[4096];
@@ -451,7 +553,7 @@ string ToString(string_list StringList, u8 Separator) {
         At += S.Length;
     }
 
-    return String(Buffer, Length);
+    return CreateString(Buffer, Length);
 }
 
 #if 0
@@ -553,8 +655,88 @@ target *TargetIterNext(target *It, target_list *TargetList) {
 }
 #endif
 
+struct cmd_variable {
+    string Name;
+    string Value;
+};
 
+typedef array(cmd_variable) cmd_variable_array;
 
+static cmd_variable_array GlobalVariables = {};
+
+void DefineVariable(string Name, string Value) {
+    cmd_variable Var = {};
+    Var.Name = Name;
+    Var.Value = Value;
+    ArrayAdd(&GlobalVariables, Var);
+}
+
+struct get_variable_result {
+    string Value;
+    bool Found;
+};
+
+get_variable_result GetVariable(cmd_variable *Variables, u64 VariableCount, string Name) {
+    get_variable_result Result = {};
+    for (u64 i = 0; i < VariableCount; i += 1) {
+        cmd_variable Var = Variables[i];
+        if (StringMatch(Var.Name, Name)) {
+            Result.Value = Var.Value;
+            Result.Found = true;
+            break;
+        }
+    }
+
+    if (!Result.Found) {
+        for (u64 i = 0; i < GlobalVariables.Count; i += 1) {
+            cmd_variable Var = GlobalVariables.Data[i];
+            if (StringMatch(Var.Name, Name)) {
+                Result.Value = Var.Value;
+                Result.Found = true;
+                break;
+            }
+        }
+    }
+
+    return Result;
+}
+
+string ReplaceVars(string String, cmd_variable *Variables, u64 VariableCount) {
+    u64 VariablesLength = 0;
+    for (u64 i = 0; i < VariableCount; i += 1) {
+        VariablesLength += Variables[i].Value.Length;
+    }
+
+    // TODO: Find a better way
+    for (u64 i = 0; i < GlobalVariables.Count; i += 1) {
+        VariablesLength += GlobalVariables.Data[i].Value.Length;
+    }
+
+    u8 *Buffer = (u8 *)calloc(VariablesLength + String.Length, 1);
+    u64 Length = 0;
+    for (u64 i = 0; i < String.Length; i += 1) {
+        u8 c = String.Str[i];
+        if (c == '{') {
+            u64 CloseBraceIndex = StringFind(String, '}', i);
+            if (CloseBraceIndex < String.Length) {
+                string VariableName = SubstrRange(String, i + 1, CloseBraceIndex);
+                get_variable_result Variable = GetVariable(Variables, VariableCount, VariableName);
+                if (Variable.Found) {
+                    memcpy(Buffer + Length, Variable.Value.Str, Variable.Value.Length);
+                    Length += Variable.Value.Length;
+                    i = CloseBraceIndex;
+                    continue;
+                }
+                else {
+                    fprintf(stdout, "Error: Undefined variable %.*s\n", Strval(VariableName));
+                }
+            }
+        }
+        Buffer[Length++] = c;
+    }
+
+    return CreateString(Buffer, Length);
+}
 
 // TODO: Its probably better to first just recurse to leaf nodes, then check if then need 
 // to be rebuilt and scan upwards. 
@@ -594,10 +776,14 @@ bool BuildTarget(target *Target) {
         string_list PrereqsList = ToStringList(Target->Prereqs);
         string PrereqsString = ToString(PrereqsList, ' ');
 
+        cmd_variable Variables[2] = {};
+        Variables[0] = cmd_variable{Str("Target"), PrereqsString};
+        Variables[1] = cmd_variable{Str("Prereqs"), Target->Name};
+        string SubstitutedString = ReplaceVars(Target->Command, Variables, ArrayCount(Variables));
 
-        fprintf(stdout, "Command: '%.*s'\n", Strval(Target->Command));
-        s32 ReturnCode = OS_RunCommand(Target->Command, Target->Name, PrereqsString); 
-
+        fprintf(stdout, "Command:     '%.*s'\n", Strval(Target->Command));
+        fprintf(stdout, "Substituted: '%.*s'\n", Strval(SubstitutedString));
+        s32 ReturnCode = OS_RunCommand(SubstitutedString);
         if (ReturnCode != 0) {
             TargetUpToDate = false;
         }
@@ -675,6 +861,8 @@ target_list TargetList(string_list Targets, target_list Prereqs, string Command)
 
     return TargetList;
 }
+
+#endif
 
 
 

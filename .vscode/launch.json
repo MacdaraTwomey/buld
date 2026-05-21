@@ -8,21 +8,12 @@
             "name": "Debug from linux",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/build/buld",
-            "args": ["build/test"],
+            "program": "${workspaceFolder}/target/buld",
             "cwd": "${workspaceFolder}",
-            "terminal": "integrated"
-        },
-        {
-            // This debugs programs compiled with Linux clang.
-            // You can only run this configuration when vscode is remoted into linux fileystem.
-            "name": "Debug from linux (build/test)",
-            "type": "lldb",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/test",
-            "cwd": "${workspaceFolder}",
-            "stopOnEntry": true,
-            //"stopOnEntry": true,
+            //"env": {"LD_LIBRARY_PATH": "target"},
+            //"args": ["target/test"],
+            "terminal": "integrated",
+            "preLaunchTask": "buildLinux",
         },
         {
             // This debugs programs compiled with clang.exe (and probably MSVC).
@@ -30,10 +21,22 @@
             "name": "Debug from windows",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/buld",
+            "program": "${workspaceFolder}/target/base",
             "symbolSearchPath": "${workspaceFolder}/code",
             "console": false,
             "visualizerFile": "${workspaceFolder}/my.natvis",
+            "preLaunchTask": "build",
+        },
+        {
+            "type": "lldb-dap",
+            "request": "launch",
+            "name": "LLDB DAP",
+            "program": "${workspaceFolder}/target/base",
+            "args": [ "test" ],
+            "env": {
+                "ASAN_OPTIONS": "detect_leaks=0",
+            },
+            "console": "integratedTerminal",
         }
     ],
 }
