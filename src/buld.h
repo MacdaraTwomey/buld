@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdarg.h>
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -45,6 +46,13 @@ constexpr size_t ArrayCount(T(&)[n])
         return n;
 }
 
+#if BASE_COMPILER_CLANG || BASE_COMPILER_GCC
+// 1 based indexing for parameter
+#  define BASE_FORMAT_STRING_CHECK(StringIndex, ArgsIndex)  __attribute__((__format__ (__printf__, StringIndex, ArgsIndex)))
+#else
+#  define BASE_FORMAT_STRING_CHECK(StringIndex, ArgsIndex)
+#endif
+
 #define array(Type) struct { Type *Data; u64 Capacity; u64 Count; }
 
 #define ArrayAdd(Array, Element) ( \
@@ -66,18 +74,10 @@ void *ArrayExpand(void **Data, u64 *Capacity, u32 ElementSize) {
 struct string {
     u64 Length;
     u8 *Str;
-    string() = default;
-    string(u64 Len, u8 *String) {
-        Length = Len;
-        Str = String;
-    }
-    string(const char *String) {
-        Length = strlen(String);
-        Str = (u8 *)String;
-    }
 };
 
 #define StrArg(String) ((int)((String).Length)), ((String).Str)
+#define Strlit(String) (string{ sizeof(String)-1, (u8 *)String })
 
 
 typedef array(string) string_list;
@@ -93,6 +93,10 @@ string CreateString(u8 *Str, u64 Length) {
 
 string CreateString(char *Str) {
     return { strlen(Str), (u8 *)Str };
+}
+
+string CreateString(u8 *Str) {
+    return { strlen((char *)Str), (u8 *)Str };
 }
 
 string StringPrefix(string String, u64 Length) {
@@ -211,6 +215,68 @@ string StringConcat(ts... Args)
     }
 
     return CreateString(StringMemory, CopiedLength);
+}
+
+// TODO: Make this better if not using arena
+string PushStringfArgs(char *Format, va_list Args) BASE_FORMAT_STRING_CHECK(1, 2)
+{
+    u64 Length = 0;
+    u64 Capacity = 1024;
+    u8 *Buffer = PushArray(Capacity, u8);
+
+    // We have to copy the va_list because we may call vsnprintf twice
+    va_list ArgsCopy;
+    va_copy(ArgsCopy, Args);
+
+    int RequiredCharCount = vsnprintf((char *)Buffer, Capacity, Format, Args);
+    if (RequiredCharCount < 0)
+    {
+        // Error
+        Length = 0;
+        assert(0);
+    }
+    else if ((u64)RequiredCharCount >= Capacity)
+    {
+        // Truncated
+        // Returns the number of chars that would have been written (not including the null terminator).
+        // If RequiredCharCount == StringLength (not including null terminator) then the last char was not
+        // written as a null terminator must be written instead.
+
+        u64 NewCapacity = (u64)RequiredCharCount + 1;
+        Buffer = PushArray(NewCapacity, u8);
+
+        int WrittenCharCount = vsnprintf((char *)Buffer, NewCapacity, Format, ArgsCopy);
+        if (WrittenCharCount < 0)
+        {
+            Length = 0;
+            assert(0);
+        }
+        else
+        {
+            // Leave null terminated in allocated string
+            Length = (u64)WrittenCharCount;
+        }
+    }
+    else
+    {
+        // Success
+        Length = (u64)RequiredCharCount;
+    }
+
+    va_end (ArgsCopy);
+
+    return CreateString(Buffer, Length);
+}
+
+
+string PushStringf(char *Format, ...)
+{
+    va_list Args;
+    va_start (Args, Format);
+    string Result = PushStringfArgs(Format, Args);
+    va_end (Args);
+
+    return Result;
 }
 
 struct string_node
@@ -334,12 +400,44 @@ void CopyString(u8 *Buffer, string String) {
     Buffer[String.Length] = 0;
 }
 
-#if 0
+
+template<class T> struct remove_reference { typedef T type; };
+template<class T> struct remove_reference<T&> { typedef T type; };
+template<class T> struct remove_reference<T&&> { typedef T type; };
+template< class T >
+using remove_reference_t = typename remove_reference<T>::type;
+
+struct true_type {
+    static constexpr bool value = true;
+    constexpr operator bool() const noexcept { return value; }
+};
+
+struct false_type {
+    static constexpr bool value = false;
+    constexpr operator bool() const noexcept { return value; }
+};
+
+template<class T> struct is_lvalue_reference     : false_type {};
+template<class T> struct is_lvalue_reference<T&> : true_type {};
+template< class T >
+constexpr bool is_lvalue_reference_v = is_lvalue_reference<T>::value;
+
+template <typename T>
+constexpr T&& forward(remove_reference_t<T>& t) noexcept {
+    return static_cast<T&&>(t);
+}
+
+template <typename T>
+constexpr T&& forward(remove_reference_t<T>&& t) noexcept {
+    static_assert(!is_lvalue_reference_v<T>, "cannot forward rvalue as lvalue");
+    return static_cast<T&&>(t);
+}
 
 //-----------------------------------------------------------------------------
 // OS
 //
 
+// TODO: Push an error if this fails
 typedef struct {
     s64 ModTime;
     bool Exists;
@@ -386,7 +484,7 @@ string_list OS_ReadDir(string Path) {
                 continue;
             }
 
-            string Entry = CString(Name);
+            string Entry = CreateString(Name);
             ArrayAdd(&DirContents, Entry);
         }
     }
@@ -444,32 +542,18 @@ string GetArg(arg_parser *Parser) {
     return SubstrRange(Parser->String, Start, End);
 }
 
-s32 OS_RunCommand(string Command) {
+s32 OS_RunProcess(string Program, string *Args, s32 ArgCount) {
     s32 ReturnCode = -1;
 
-    u8 ZCommand[4096];
-    CopyString(ZCommand, Command);
-
     zstring_list Argv = {};
-    arg_parser Parser = {};
-    Parser.String = Command;
-    string Program = GetArg(&Parser);
-    if (Parser.Error || Program.Length == 0) {
-        fprintf(stderr, "Error with command %.*s\n", Strval(Command));
-        return -1;
-    }
 
     u8 *ZProgram = (u8 *)calloc(Program.Length + 1, 1);
     CopyString(ZProgram, Program);
 
     ArrayAdd(&Argv, ZProgram);
 
-    while (!Parser.Error) {
-        string Arg = GetArg(&Parser);
-        if (Arg.Length == 0) {
-            break;
-        }
-
+    for (s32 i = 0; i < ArgCount; i += 1) {
+        string Arg = Args[i];
         u8 *ZArg = (u8 *)calloc(Arg.Length + 1, 1);
         CopyString(ZArg, Arg);
         ArrayAdd(&Argv, ZArg);
@@ -481,12 +565,6 @@ s32 OS_RunCommand(string Command) {
     if (PID == -1) {
     }
     else if (PID == 0) {
-
-        if (Parser.Error) {
-            fprintf(stderr, "Error parsing command %.*s\n", Strval(Command));
-            return -1;
-        }
-
         if (execvp((char *)ZProgram, (char **)Argv.Data) < 0) {
             fprintf(stderr, "Child failed to exec()\n");
             exit(1);
@@ -515,145 +593,56 @@ s32 OS_RunCommand(string Command) {
 }
 
 //-----------------------------------------------------------------------------
-// Incremental build
+// build library
 //
 
 struct target;
 
-typedef array(struct target) target_list;
+struct target_list {
+    target **Elements;
+    u64 Count;
 
-typedef struct target {
-    target_list Prereqs;
-    string Name;
-    bool NeedsRebuild;
-    bool Exists;
-    s64 ModTime; 
-    string Error;
-    string Command;
-} target;
+    target_list() = default;
+    target_list(const char *String);
+    target_list(target *Target);
+};
 
-string_list ToStringList(target_list TargetList) {
-    string_list StringList = {0};
-    for (u64 i = 0; i < TargetList.Count; i += 1) {
-        ArrayAdd(&StringList, TargetList.Data[i].Name);
-    }
-    return StringList;
+// TODO: Maybe make a version of this for the API and another thats internal
+struct target {
+    const char *Path;
+    os_file_info FileInfo;
+    target *ParentCommand;
+
+    target_list Input;
+    target_list Output;
+    const char *Args;
+    const char *Program;
+
+    bool RequiresRebuild;
+};
+
+struct state {
+    target Targets[10000];
+    u64 TargetCount;
+    string Errors[10000];
+    u64 ErrorCount;
+    string ProjectRoot;
+};
+
+state State = {};
+
+void PushError(string String) {
+    State.Errors[State.ErrorCount++] = String;
 }
 
-string ToString(string_list StringList, u8 Separator) {
-    u64 Length = 0;
-    for (u64 i = 0; i < StringList.Count; i += 1) {
-        Length += StringList.Data[i].Length;
-    }
-    u8 *Buffer = (u8 *)calloc(1, Length);
-    u64 At = 0;
-    for (u64 i = 0; i < StringList.Count; i += 1) {
-        string S = StringList.Data[i];
-        memcpy(Buffer + At, S.Str, S.Length);
-        At += S.Length;
-    }
-
-    return CreateString(Buffer, Length);
+void PushError(char *Format, ...) BASE_FORMAT_STRING_CHECK(1, 2) {
+    va_list Args;
+    va_start (Args, Format);
+    string Result = PushStringfArgs(Format, Args);
+    va_end (Args);
+    PushError(Result);
 }
 
-#if 0
-target_list Sources(string_list Names) {
-    target_list TargetList = {0};
-    for (u64 i = 0; i < Names.Count; i += 1) {
-         string Name = Names.Data[i];
-         os_file_info FileInfo = OS_GetFileInfo(Name);
-         if (!FileInfo.Ok) {
-            fprintf(stderr, "Unable to stat file %.*s\n", Strval(Name));
-            return (target_list){0};
-         }
-
-         if (!FileInfo.Exists) {
-            TargetList = (target_list){0};
-            break;
-         }
-
-         target T = { .Name = Names.Data[i], .ModTime = FileInfo.ModTime };
-         ArrayAdd(&TargetList, T);
-    }
-
-    return TargetList;
-}
-
-// main1: obj1 obj2 obj3
-
-// obj1 : cpp1
-// obj2 : cpp2
-// obj3 : cpp3
-
-// Need cycle detection? Maybe just rely on user not doing that
-// Handling failed commands
-// Target with no prereqs isn't useful they can just have a cmdline and run command thing
-// for that. 
-
-target Target(string TargetName, target_list Prereqs) {
-    // This assumes that all prereqs already exist
-    bool NeedsRebuild = true;
-    s64 TargetModTime = INT64_MAX;
-    if (Prereqs.Count > 0) {
-        NeedsRebuild = false;
-        os_file_info FileInfo = OS_GetFileInfo(TargetName);
-        if (!FileInfo.Ok) {
-            fprintf(stderr, "Unable to stat file %.*s\n", Strval(TargetName));
-            return (target){0};
-        }
-
-        if (FileInfo.Exists) {
-            for (u64 i = 0; i < Prereqs.Count; i += 1) {
-                target *Prereq = Prereqs.Data + i;
-                if (Prereq->NeedsRebuild || FileInfo.ModTime < Prereq->ModTime) {
-                    NeedsRebuild = true;
-                    break;
-                }
-            }
-            TargetModTime = FileInfo.ModTime;
-        }
-    }
-
-    target Target = { 
-        .Name = TargetName, 
-        .Prereqs = Prereqs, 
-        .NeedsRebuild = NeedsRebuild, 
-        .ModTime = TargetModTime,
-    };
-
-    return Target;
-}
-
-target_list TargetList(string_list Targets, target_list Prereqs) {
-
-    // This assumes that all prereqs already exist
-    target_list TargetList = {0};
-    for (u64 i = 0; i < Targets.Count; i += 1) {
-        target_list Prereq = {0};
-        ArrayAdd(&Prereq, Prereqs.Data[i]);
-        target T = Target(Targets.Data[i], Prereq);
-        ArrayAdd(&TargetList, T);
-    }
-
-    return TargetList;
-}
-
-target *TargetIterNext(target *It, target_list *TargetList) {
-    target *Result = 0;
-    if (TargetList->Count > 0) {
-        target *Begin = (It) ? (It + 1) : TargetList->Data;
-        target *End = TargetList->Data + TargetList->Count;
-        for (target *It = Begin; It != End; It += 1) {
-            if (It->NeedsRebuild) {
-                Result = It;
-                break;
-            }
-        }
-    }
-
-    return Result;
-}
-#endif
 
 struct cmd_variable {
     string Name;
@@ -737,132 +726,4 @@ string ReplaceVars(string String, cmd_variable *Variables, u64 VariableCount) {
 
     return CreateString(Buffer, Length);
 }
-
-// TODO: Its probably better to first just recurse to leaf nodes, then check if then need 
-// to be rebuilt and scan upwards. 
-// This wastes work attempting to check root nodes against intermediate nodes times, when
-// a changed leaf node would have forced a rebuild anyway.
-bool BuildTarget(target *Target) {
-
-    if (Target->Error.Length) {
-        fprintf(stderr, "Error: %.*s\n", Strval(Target->Error));
-        return false;
-    }
-
-    if (Target->Prereqs.Count == 0 && !Target->Exists) {
-        fprintf(stdout, "Error: File %.*s does not exist\n", Strval(Target->Name));
-        return false;
-    }
-
-    bool PrereqsUpToDate = true;
-    bool TargetUpToDate = Target->Exists;
-    for (u64 i = 0; i < Target->Prereqs.Count; i += 1) {
-        target *Prereq = Target->Prereqs.Data + i;
-        bool PrereqUpToDate = BuildTarget(Prereq);
-        if (PrereqUpToDate) {
-            if (Prereq->ModTime > Target->ModTime) {
-                TargetUpToDate = false;
-            }
-        }
-        else {
-            TargetUpToDate = false;
-            PrereqsUpToDate = false;
-            break;
-        }
-    }
-
-    // Could also add list of (target, prereqs) and return that to user
-    if (PrereqsUpToDate && !TargetUpToDate && Target->Command.Length) {
-        string_list PrereqsList = ToStringList(Target->Prereqs);
-        string PrereqsString = ToString(PrereqsList, ' ');
-
-        cmd_variable Variables[2] = {};
-        Variables[0] = cmd_variable{Str("Target"), PrereqsString};
-        Variables[1] = cmd_variable{Str("Prereqs"), Target->Name};
-        string SubstitutedString = ReplaceVars(Target->Command, Variables, ArrayCount(Variables));
-
-        fprintf(stdout, "Command:     '%.*s'\n", Strval(Target->Command));
-        fprintf(stdout, "Substituted: '%.*s'\n", Strval(SubstitutedString));
-        s32 ReturnCode = OS_RunCommand(SubstitutedString);
-        if (ReturnCode != 0) {
-            TargetUpToDate = false;
-        }
-    }
-
-    return TargetUpToDate;
-}
-
-bool CheckOk(target Target) {
-    if (Target.Error.Length) {
-        fprintf(stderr, "Error: %.*s\n", Strval(Target.Error));
-        return false;
-    }
-
-    if (Target.Prereqs.Count == 0 && !Target.Exists) {
-        fprintf(stdout, "Error: File %.*s does not exist\n", Strval(Target.Name));
-        return false;
-    }
-
-
-    for (u64 i = 0; i < Target.Prereqs.Count; i += 1) {
-        target *Prereq = Target.Prereqs.Data + i;
-        bool Ok = CheckOk(*Prereq);
-        if (!Ok) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-target Target(string Name, target_list Prereqs, string Command) {
-    os_file_info FileInfo = OS_GetFileInfo(Name);
-    // TODO: Better error message
-    string Error = (!FileInfo.Ok) ? Str("Unable to stat file") : Str("");
-
-    target Target = {};
-    Target.Name = Name;
-    Target.Prereqs = Prereqs;
-    Target.Command = Command;
-    Target.ModTime = FileInfo.ModTime;
-    Target.Exists = FileInfo.Exists;
-    Target.NeedsRebuild = false;
-    Target.Error = Error;
-    return Target;
-}
-
-target_list TargetList(string_list Targets, target_list Prereqs, string Command) {
-    target_list TargetList = {0};
-    if (Prereqs.Count == 0) {
-        // leaf node e.g. source file
-        for (u64 i = 0; i < Targets.Count; i += 1) {
-            target T = Target(Targets.Data[i], Prereqs, Command);
-            ArrayAdd(&TargetList, T);
-        }
-    }
-    else if (Targets.Count == 1) {
-        // 1 out < 1 in
-        // 1 out <- many in 
-        target T = Target(Targets.Data[0], Prereqs, Command);
-        ArrayAdd(&TargetList, T);
-    }
-    else {
-        assert(Targets.Count == Prereqs.Count);
-
-        // many out < many in
-        for (u64 i = 0; i < Targets.Count; i += 1) {
-            // 1 out < 1 in
-            target_list OnePrereq = {};
-            ArrayAdd(&OnePrereq, Prereqs.Data[i]);
-            target T = Target(Targets.Data[i], OnePrereq, Command);
-            ArrayAdd(&TargetList, T);
-        }
-    }
-
-    return TargetList;
-}
-
-#endif
-
-
 

@@ -9,11 +9,12 @@
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/target/buld",
+            //"args": "--graph graph.dot",
             "cwd": "${workspaceFolder}",
             //"env": {"LD_LIBRARY_PATH": "target"},
             //"args": ["target/test"],
             "terminal": "integrated",
-            "preLaunchTask": "buildLinux",
+            //"preLaunchTask": "buildLinux",
         },
         {
             // This debugs programs compiled with clang.exe (and probably MSVC).
