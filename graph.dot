@@ -1,0 +1,19 @@
+strict digraph G {
+x0x5dd4cf3b60b8 [label="sample/main.cpp", shape=ellipse]
+x0x5dd4cf3b60b8 -> x0x5dd4cf3b6168
+x0x5dd4cf3b6168 [label="clang++ -c {INPUT} -o {OUTPUT} -g -MD", shape=box, style=filled, fillcolor=orange]
+x0x5dd4cf3b6168 -> x0x5dd4cf3b6110
+x0x5dd4cf3b6110 [label="sample/build/main.o", shape=ellipse, style=filled, fillcolor=orange]
+x0x5dd4cf3b6110 [label="sample/build/main.o", shape=ellipse, style=filled, fillcolor=orange]
+x0x5dd4cf3b6110 -> x0x5dd4cf3b6320
+x0x5dd4cf3b61c0 [label="sample/file1.cpp", shape=ellipse]
+x0x5dd4cf3b61c0 -> x0x5dd4cf3b6270
+x0x5dd4cf3b6270 [label="clang++ -c {INPUT} -o {OUTPUT} -g -MD", shape=box, style=filled, fillcolor=orange]
+x0x5dd4cf3b6270 -> x0x5dd4cf3b6218
+x0x5dd4cf3b6218 [label="sample/build/file1.o", shape=ellipse, style=filled, fillcolor=orange]
+x0x5dd4cf3b6218 [label="sample/build/file1.o", shape=ellipse, style=filled, fillcolor=orange]
+x0x5dd4cf3b6218 -> x0x5dd4cf3b6320
+x0x5dd4cf3b6320 [label="clang++ -o {OUTPUT} {INPUT}", shape=box, style=filled, fillcolor=orange]
+x0x5dd4cf3b6320 -> x0x5dd4cf3b62c8
+x0x5dd4cf3b62c8 [label="sample/build/main.exe", shape=ellipse, style=filled, fillcolor=orange]
+}

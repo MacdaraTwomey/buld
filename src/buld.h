@@ -85,7 +85,6 @@ typedef array(string) string_list;
 typedef array(u8 *) zstring_list;
 
 #define Str(String) string{(sizeof(String)-1), (u8 *)String }
-#define Strval(String) (int)((String).Length), (String).Str
 
 string CreateString(u8 *Str, u64 Length) {
     return { Length, Str };
@@ -121,6 +120,17 @@ string SubstrRange(string String, u64 First, u64 OnePastLast) {
     return String;
 }
 
+u8 StringGetChar(string String, u64 Index)
+{
+    u8 Result = 0;
+    if (Index < String.Length)
+    {
+        Result = String.Str[Index];
+    }
+
+    return Result;
+}
+
 bool StringMatch(string A, string B) {
     bool Match = A.Length == B.Length;
     if (Match) {
@@ -134,6 +144,11 @@ bool StringMatch(string A, string B) {
 
     return Match;
 }
+
+bool StringStartsWith(string String, string PrefixString) {
+    return StringMatch(StringPrefix(String, PrefixString.Length), PrefixString);
+}
+
 
 u64 StringRFind(string String, u8 Char) {
     u64 Index = String.Length;
@@ -186,6 +201,51 @@ u64 StringFindStr(string Haystack, string Needle, u64 Start) {
     }
 
     return Position;
+}
+
+u64 StringFindChar(string String, u8 Char, u64 Start=0);
+
+u64 StringFindChar(string String, u8 Char, u64 Start)
+{
+    u64 Position = String.Length;
+    for (u64 i = Start; i < String.Length; ++i)
+    {
+        if (String.Str[i] == Char)
+        {
+            Position = i;
+            break;
+        }
+    }
+
+    return Position;
+}
+
+struct cut_result {
+    string Before;
+    string After;
+    bool Found;
+};
+
+cut_result StringCut(string String, string Separator) {
+    cut_result Result = {};
+
+    u64 Index = StringFindStr(String, Separator);
+    if (Index < String.Length) {
+        Result = {
+            .Before = StringPrefix(String, Index),
+            .After = StringSkip(String, Index + Separator.Length),
+            .Found = true,
+        };
+    }
+    else {
+        Result = {
+            .Before = String,
+            .After = Strlit(""),
+            .Found = false,
+        };
+    }
+
+    return Result;
 }
 
 string PathGetDir(string Path) {
@@ -343,6 +403,47 @@ string FindReplace(string String, string MatchString, string ReplaceString) {
     return Result;
 }
 
+bool IsNumber(u8 c)
+{
+    return (('0' <= c) && (c <= '9'));
+}
+
+struct parsed_num
+{
+    u64 Value;
+    bool Error;
+};
+
+parsed_num StringParseNum(string String)
+{
+    parsed_num Result = {};
+    Result.Error = (String.Length == 0);
+
+    for (u64 i = 0; i < String.Length; ++i)
+    {
+        u8 c = String.Str[i];
+        if (!IsNumber(c))
+        {
+            Result.Value = 0;
+            Result.Error = true;
+            return Result;
+        };
+
+        u64 NewValue = (Result.Value * 10) + (c - '0');
+        if (NewValue < Result.Value)
+        {
+            Result.Value = 0;
+            Result.Error = true;
+            return Result;
+        }
+
+        Result.Value = NewValue;
+    }
+
+    return Result;
+}
+
+
 #if 0
 
 string FindReplace(string String, string FindPattern, string ReplacePattern, string MatchPattern) {
@@ -495,6 +596,52 @@ string_list OS_ReadDir(string Path) {
     return DirContents;
 }
 
+struct read_entire_file_result {
+    string String;
+    bool Error;
+    bool NotExist;
+};
+
+read_entire_file_result OS_ReadEntireFile(string Path) {
+    read_entire_file_result Result = {};
+
+    u8 ZPath[4096];
+    memcpy(ZPath, Path.Str, Path.Length);
+    ZPath[Path.Length] = 0;
+
+    FILE *File = fopen((char *)ZPath, "rb");
+    if (File) {
+        int SeekResult = fseek(File, 0, SEEK_END);
+        long Size = ftell(File);
+        SeekResult |= fseeko(File, 0, SEEK_SET);
+        if (SeekResult == 0 && Size != -1) {
+            u8 *Buffer = PushArray(Size, u8);
+
+            size_t ReadSize = fread(Buffer, 1, Size, File);
+            if (ReadSize == Size) {
+                Result.String = CreateString(Buffer, Size);
+            }
+            else {
+                Result.Error = true;
+            }
+        }
+        else {
+            Result.Error = true;
+        }
+        fclose(File);
+    }
+    else {
+        if (errno == ENOENT) {
+            Result.NotExist = true;
+        }
+        else {
+            Result.Error = true;
+        }
+    }
+
+    return Result;
+}
+
 struct arg_parser {
     u64 At;
     string String;
@@ -584,7 +731,7 @@ s32 OS_RunProcess(string Program, string *Args, s32 ArgCount) {
             else if (WIFSIGNALED(ChildStatus)) {
                 // TODO Signal names
                 int Signal = WTERMSIG(ChildStatus);
-                fprintf(stdout, "Program %.*s signalled %d (%s)\n", Strval(Program), Signal, strsignal(Signal));
+                fprintf(stdout, "Program %.*s signalled %d (%s)\n", StrArg(Program), Signal, strsignal(Signal));
             }
         }
     }
@@ -618,7 +765,7 @@ struct target {
     const char *Args;
     const char *Program;
 
-    bool RequiresRebuild;
+    bool NeedsRebuild;
 };
 
 struct state {
@@ -627,6 +774,8 @@ struct state {
     string Errors[10000];
     u64 ErrorCount;
     string ProjectRoot;
+    target *CommandsToRun[10000];
+    u64 CommandsToRunCount;
 };
 
 state State = {};
@@ -717,7 +866,7 @@ string ReplaceVars(string String, cmd_variable *Variables, u64 VariableCount) {
                     continue;
                 }
                 else {
-                    fprintf(stdout, "Error: Undefined variable %.*s\n", Strval(VariableName));
+                    fprintf(stdout, "Error: Undefined variable %.*s\n", StrArg(VariableName));
                 }
             }
         }

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+ 
+  <Type Name="v2">
+    <DisplayString>{{x={x,g} y={y,g}}}</DisplayString>
+    <Expand>
+    <Item Name="x">x</Item>
+    <Item Name="y">y</Item>
+    </Expand>
+  </Type>
+  
+  <Type Name="v3">
+    <DisplayString>{{x={x,g} y={y,g}, z={z,g}}}</DisplayString>
+    <Expand>
+    <Item Name="x">x</Item>
+    <Item Name="y">y</Item>
+    <Item Name="z">z</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="v4">
+    <DisplayString>{{x={x,g} y={y,g}, z={z,g}, w={w,g}}}</DisplayString>
+    <Expand>
+    <Item Name="x">x</Item>
+    <Item Name="y">y</Item>
+    <Item Name="z">z</Item>
+    <Item Name="w">w</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="string">
+    <DisplayString>{Str,[Length]s8}</DisplayString>
+    <StringView>Str,[Length]s8</StringView>
+    <Expand>
+      <Item Name="Length">Length</Item>
+      <Item Name="Str">Str</Item>
+    </Expand>
+  </Type>
+
+</AutoVisualizer>
+
+
+</AutoVisualizer>

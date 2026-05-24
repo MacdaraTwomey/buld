@@ -30,7 +30,8 @@
                 },
                 {
                     "name": "run",
-                    "cmd": "bash.exe -c /home/mac/projects/buld/target/buld",
+                    "working_dir": "$project_path",
+                    "cmd": "bash.exe -c cd /home/mac/projects/buld/ && /home/mac/projects/buld/target/buld",
                 }
             ],
         }
