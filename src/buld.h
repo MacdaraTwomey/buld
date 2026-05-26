@@ -750,22 +750,32 @@ struct target_list {
     u64 Count;
 
     target_list() = default;
-    target_list(const char *String);
+    target_list(string String);
     target_list(target *Target);
 };
 
-// TODO: Maybe make a version of this for the API and another thats internal
 struct target {
-    const char *Path;
+    string Path;
     os_file_info FileInfo;
     target *ParentCommand;
 
     target_list Input;
     target_list Output;
-    const char *Args;
-    const char *Program;
+    string Args;
+    string Program;
+    target_list Depends;
 
     bool NeedsRebuild;
+};
+
+template <typename a, typename b, typename c>
+struct target_args {
+    a Path;
+    target_list Input;
+    target_list Output;
+    b Args;
+    c Program;
+    target_list Depends;
 };
 
 struct state {

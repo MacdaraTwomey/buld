@@ -5,7 +5,8 @@ target *Target(target Value = {}) {
     target *Result = &State.Targets[State.TargetCount++];
     *Result = Value;
     for (u64 i = 0; i < Result->Output.Count; i += 1) {
-        assert(Result->Program);
+        //TODO: Dedupe with things in depends or things already in input? Or rely on caller to do this.
+        assert(Result->Program.Length);
         target *Output = Result->Output.Elements[i];
         assert(!Output->ParentCommand);
         Output->ParentCommand = Result;
@@ -13,7 +14,7 @@ target *Target(target Value = {}) {
     return Result;
 }
 
-void ListAdd(target_list *List, const char *String) {
+void ListAdd(target_list *List, string String) {
     List->Elements[List->Count++] = Target({ .Path = String });
 }
 void ListAdd(target_list *List, target *Target) {
@@ -27,7 +28,7 @@ void ListAdd(target_list *List, target *Target) {
     }
 }
 
-target_list::target_list(const char *String) {
+target_list::target_list(string String) {
     Count = 0;
     Elements = PushArray(1, target *);
     ListAdd(this, String);
@@ -53,8 +54,8 @@ target_list List(args&&... Args) {
 }
 
 string TargetString(target *Target) {
-    assert(Target->Path);
-    string String = CreateString((char *)Target->Path);
+    assert(Target->Path.Length);
+    string String = Target->Path;
     return String;
 }
 
@@ -96,19 +97,26 @@ build_result BuildTarget(target *Target) {
             BuildResult.NeedsRebuild |= InputBuildResult.NeedsRebuild;
             NewestInputTimestamp = Max(NewestInputTimestamp, Input->FileInfo.ModTime);
         }
+        for (u64 TargetIndex = 0; TargetIndex < Target->Depends.Count; TargetIndex += 1) {
+            target *Dep = Target->Depends.Elements[TargetIndex];
+            build_result DependsBuildResult = BuildTarget(Dep);
+            BuildResult.Error |= DependsBuildResult.Error;
+            BuildResult.NeedsRebuild |= DependsBuildResult.NeedsRebuild;
+            NewestInputTimestamp = Max(NewestInputTimestamp, Dep->FileInfo.ModTime);
+        }
     }
 
     if (BuildResult.Error) {
         return BuildResult;
     }
 
-    if (Target->Program) {
+    if (Target->Program.Length) {
         if (!BuildResult.NeedsRebuild) {
             u64 NewestOutputTimestamp = 0;
             for (u64 TargetIndex = 0; TargetIndex < Target->Output.Count; TargetIndex += 1) {
                 target *Output = Target->Output.Elements[TargetIndex];
-                assert(Output->Path);
-                os_file_info FileInfo = OS_GetFileInfo(ProjectPath(CreateString((char *)Output->Path)));
+                assert(Output->Path.Length);
+                os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
                 if (FileInfo.Exists) {
                     NewestOutputTimestamp = Max(NewestOutputTimestamp, FileInfo.ModTime);
                 }
@@ -119,9 +127,9 @@ build_result BuildTarget(target *Target) {
             }
 
             if (NewestInputTimestamp > NewestOutputTimestamp) {
-                assert(!Target->Path);
+                assert(!Target->Path.Length);
                 assert(Target->Output.Count);
-                assert(Target->Program);
+                assert(Target->Program.Length);
                 BuildResult.NeedsRebuild = true;
             }
         }
@@ -131,7 +139,7 @@ build_result BuildTarget(target *Target) {
 
             for (u64 TargetIndex = 0; TargetIndex < Target->Output.Count; TargetIndex += 1) {
                 target *Output = Target->Output.Elements[TargetIndex];
-                assert(Output->Path);
+                assert(Output->Path.Length);
 
                 // We have to also set NeedsRebuild here otherwise root level commands outputs wont be set
                 Output->NeedsRebuild = BuildResult.NeedsRebuild;
@@ -140,14 +148,14 @@ build_result BuildTarget(target *Target) {
         }
     }
     else {
-        assert(Target->Path);
-        if (Target->ParentCommand == 0) {
+        assert(Target->Path.Length);
+        if (!Target->ParentCommand) {
             // Leaf node
             assert(Target->Input.Count == 0);
 
-            os_file_info FileInfo = OS_GetFileInfo(ProjectPath(CreateString((char *)Target->Path)));
+            os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Target->Path));
             if (!FileInfo.Exists) {
-                PushError("File '%.*s' does not exist\n", StrArg(CreateString((char *)Target->Path)));
+                PushError("File '%.*s' does not exist\n", StrArg(Target->Path));
                 BuildResult.Error = true;
             }
             Target->FileInfo = FileInfo;
@@ -171,11 +179,11 @@ void WriteGraphNode(FILE *File, target *Target) {
         }
     }
 
-    if (Target->Program) {
-        fprintf(File, "x%p [label=\"%.*s %.*s\", shape=box", (void *)Target, StrArg(CreateString((char *)Target->Program)), StrArg(CreateString((char *)Target->Args)));
+    if (Target->Program.Length) {
+        fprintf(File, "x%p [label=\"%.*s %.*s\", shape=box", (void *)Target, StrArg(Target->Program), StrArg(Target->Args));
     }
-    else if (Target->Path) {
-        fprintf(File, "x%p [label=\"%.*s\", shape=ellipse", (void *)Target, StrArg(CreateString((char *)Target->Path)));
+    else if (Target->Path.Length) {
+        fprintf(File, "x%p [label=\"%.*s\", shape=ellipse", (void *)Target, StrArg(Target->Path));
     }
     else {
         assert(0);
@@ -190,7 +198,7 @@ void WriteGraphNode(FILE *File, target *Target) {
         target *Output = Target->Output.Elements[TargetIndex];
         fprintf(File, "x%p -> x%p\n", (void *)Target, (void *)Output);
         // Print this (sometimes again) because the main programs outputs wont get labels otherwise
-        fprintf(File, "x%p [label=\"%.*s\", shape=ellipse", (void *)Output, StrArg(CreateString((char *)Output->Path)));
+        fprintf(File, "x%p [label=\"%.*s\", shape=ellipse", (void *)Output, StrArg(Output->Path));
         if (Output->NeedsRebuild) {
             fprintf(File, ", style=filled, fillcolor=orange");
         }
@@ -213,8 +221,8 @@ string ReplaceVariable(string VariableString, string VariableName, target_list *
 
     u64 BracketIndex = VariableName.Length;
     if (StringGetChar(VariableString, BracketIndex) == '[') {
-        if (VariableName.Str[VariableString.Length-1] == ']') {
-            string ArrayIndexStr = StringSkip(VariableString, BracketIndex + 1);
+        if (VariableString.Str[VariableString.Length-1] == ']') {
+            string ArrayIndexStr = SubstrRange(VariableString, BracketIndex + 1, VariableString.Length-1);
             parsed_num ParsedIndex = StringParseNum(ArrayIndexStr);
             if (ParsedIndex.Error) {
                 PushError("Error: invalid subscript for variable '%.*s'\n", StrArg(VariableString));
@@ -325,7 +333,7 @@ s32 RunBuildCommands()
         target *Target = State.CommandsToRun[TargetIndex];
 
         // TODO: Maybe do this in BuildTarget?
-        string TemplateArgs = Target->Args ? CreateString((char *)Target->Args) : Strlit("");
+        string TemplateArgs = Target->Args;
         replace_variables_result ReplaceVars = ReplaceVariables(TemplateArgs, &Target->Input, &Target->Output);
         if (ReplaceVars.Error) {
             ReturnCode = 1;
@@ -334,8 +342,10 @@ s32 RunBuildCommands()
 
         string Args = ReplaceVars.String;
 
-        string Program = CreateString((char *)Target->Program);
+        string Program = Target->Program;
 
+        // Probably need to support user passing invdividual args, if not make that the only way
+        // otherwise we need escaping, or ways for people to put things like apostropes in their args.
         string_list ArgList = {};
         arg_parser Parser = { .String = Args };
 
@@ -357,7 +367,7 @@ s32 RunBuildCommands()
         printf("[%lu/%lu] %.*s %.*s\n", TargetIndex+1, State.CommandsToRunCount, StrArg(Program), StrArg(Args));
 
         assert(Target->Output.Count);
-        assert(Target->Program);
+        assert(Target->Program.Length);
 
         bool Error = false;
 
@@ -365,8 +375,8 @@ s32 RunBuildCommands()
         if (ReturnCode == 0) {
             for (u64 OutputIndex = 0; OutputIndex < Target->Output.Count; OutputIndex += 1) {
                 target *Output = Target->Output.Elements[OutputIndex];
-                assert(Output->Path);
-                os_file_info FileInfo = OS_GetFileInfo(ProjectPath(CreateString((char *)Output->Path)));
+                assert(Output->Path.Length);
+                os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
                 if (!FileInfo.Exists) {
                     PushError("File '%.*s' does not exist after build command\n", Target->Path);
                     ReturnCode = 1;
@@ -431,7 +441,7 @@ target_list ParseDependencyFile(string String) {
 
     target_list List = {};
 
-    // TODO: Ensure the target of these matches what we expect
+    // TODO: should we ensure the target of these matches what we expect
 
     // You can always search for ': ' to know end of target, because spaces will be escaped
     // Spaces can be used to separate dependencies also
@@ -442,13 +452,16 @@ target_list ParseDependencyFile(string String) {
         if (StringGetChar(Deps, Deps.Length-1) == '\n') {
             Deps.Length -= 1;
         }
+
         u64 DepStart = 0;
         for (u64 i = 0; i < Deps.Length;) {
             u64 SpaceIndex = StringFindChar(Deps, (u8)' ', i);
             if (((SpaceIndex < Deps.Length) && (StringGetChar(Deps, SpaceIndex-1) != '\\')) || (SpaceIndex == Deps.Length)) {
                 string Path = SubstrRange(Deps, DepStart, SpaceIndex);
                 string UnescapedPath = UnEscapeMakeDependencyPath(Path);
-                printf("DEP: '%.*s'\n", StrArg(UnescapedPath));
+                //printf("DEP: %.*s: %.*s\n", StrArg(Target), StrArg(UnescapedPath));
+
+                ListAdd(&List, UnescapedPath);
 
                 u64 At = SpaceIndex + 1;
                 while (true) {
@@ -520,40 +533,42 @@ int main(int ArgCount, char **Args) {
         PushError("Error: Failed to read %.*s.", StrArg(DependencyFile));
         return 1;
     }
+
     target_list Headers = ParseDependencyFile(ReadResult.String);
 
-    target *Main = Target({
-        .Input = "sample/main.cpp",
-        .Output = List("sample/build/main.o", "sample/build/main.d"),
-        .Args = "-c {INPUT} -o {OUTPUT[0]} -g -MD -MF {OUTPUT[1]}",
-        .Program = "clang++",
+    target *Main = Target(target{
+        .Input = "sample/main.cpp"_s,
+        .Output = List("sample/build/main.o"_s, "sample/build/main.d"_s),
+        .Args = "-c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]}"_s,
+        .Program = "clang++"_s,
+        .Depends = Headers,
     });
 
     target *File1 = Target({
-        .Input = "sample/file1.cpp",
-        .Output = "sample/build/file1.o",
-        .Args = "-c {INPUT} -o {OUTPUT} -g -MD",
-        .Program = "clang++",
+        .Input = "sample/file1.cpp"_s,
+        .Output = "sample/build/file1.o"_s,
+        .Args = "-c {INPUT} -o {OUTPUT} -g -MMD"_s,
+        .Program = "clang++"_s,
     });
 
     target *Exe = Target({
-        .Input = List(Main, File1),
-        .Output = "sample/build/main.exe",
-        .Args = "-o {OUTPUT} {INPUT}",
-        .Program = "clang++",
+        .Input = List(Main->Output.Elements[0], File1),
+        .Output = "sample/build/main.exe"_s,
+        .Args = "-o {OUTPUT} {INPUT}"_s,
+        .Program = "clang++"_s,
     });
 
     target *Mkdir = Target({
-        .Output = "sample/stage",
-        .Args = "-p {OUTPUT}",
-        .Program = "mkdir",
+        .Output = "sample/stage"_s,
+        .Args = "-p {OUTPUT}"_s,
+        .Program = "mkdir"_s,
     });
 
     target *Cp = Target({
         .Input = List(Exe, Mkdir),
-        .Output = "sample/build/main.exe",
-        .Args = "",
-        .Program = "cp {OUTPUT[0]} {OUTPUT[1]}",
+        .Output = "sample/build/main.exe"_s,
+        .Args = ""_s,
+        .Program = "cp {OUTPUT[0]} {OUTPUT[1]}"_s,
     });
 
 

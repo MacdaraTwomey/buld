@@ -2,3 +2,4 @@ target/
 .cache
 sample/build/
 graph.png
+project.sublime-workfspace
