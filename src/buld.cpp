@@ -1,9 +1,17 @@
 
 #include "buld.h"
 
-target *Target(target Value = {}) {
+target *Target(target_args Value = {}) {
     target *Result = &State.Targets[State.TargetCount++];
-    *Result = Value;
+    //*Result = Value;
+    *Result = {
+        .Path = Value.Path.Data,
+        .Input = Value.Input,
+        .Output = Value.Output,
+        .Args = Value.Args.Data,
+        .Program = Value.Program.Data,
+        .Depends = Value.Depends,
+    };
     for (u64 i = 0; i < Result->Output.Count; i += 1) {
         //TODO: Dedupe with things in depends or things already in input? Or rely on caller to do this.
         assert(Result->Program.Length);
@@ -14,6 +22,9 @@ target *Target(target Value = {}) {
     return Result;
 }
 
+void ListAdd(target_list *List, const char *String) {
+    List->Elements[List->Count++] = Target({ .Path = CreateString((char *)String) });
+}
 void ListAdd(target_list *List, string String) {
     List->Elements[List->Count++] = Target({ .Path = String });
 }
@@ -28,6 +39,11 @@ void ListAdd(target_list *List, target *Target) {
     }
 }
 
+target_list::target_list(const char *String) {
+    Count = 0;
+    Elements = PushArray(1, target *);
+    ListAdd(this, CreateString((char *)String));
+}
 target_list::target_list(string String) {
     Count = 0;
     Elements = PushArray(1, target *);
@@ -536,39 +552,39 @@ int main(int ArgCount, char **Args) {
 
     target_list Headers = ParseDependencyFile(ReadResult.String);
 
-    target *Main = Target(target{
-        .Input = "sample/main.cpp"_s,
-        .Output = List("sample/build/main.o"_s, "sample/build/main.d"_s),
-        .Args = "-c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]}"_s,
-        .Program = "clang++"_s,
+    target *Main = Target({
+        .Input = "sample/main.cpp",
+        .Output = List("sample/build/main.o", "sample/build/main.d"),
+        .Args = "-c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]}",
+        .Program = "clang++",
         .Depends = Headers,
     });
 
     target *File1 = Target({
-        .Input = "sample/file1.cpp"_s,
-        .Output = "sample/build/file1.o"_s,
-        .Args = "-c {INPUT} -o {OUTPUT} -g -MMD"_s,
-        .Program = "clang++"_s,
+        .Input = "sample/file1.cpp",
+        .Output = "sample/build/file1.o",
+        .Args = "-c {INPUT} -o {OUTPUT} -g -MMD",
+        .Program = "clang++",
     });
 
     target *Exe = Target({
         .Input = List(Main->Output.Elements[0], File1),
-        .Output = "sample/build/main.exe"_s,
-        .Args = "-o {OUTPUT} {INPUT}"_s,
-        .Program = "clang++"_s,
+        .Output = "sample/build/main.exe",
+        .Args = "-o {OUTPUT} {INPUT}",
+        .Program = "clang++",
     });
 
     target *Mkdir = Target({
-        .Output = "sample/stage"_s,
-        .Args = "-p {OUTPUT}"_s,
-        .Program = "mkdir"_s,
+        .Output = "sample/stage",
+        .Args = "-p {OUTPUT}",
+        .Program = "mkdir",
     });
 
     target *Cp = Target({
         .Input = List(Exe, Mkdir),
-        .Output = "sample/build/main.exe"_s,
-        .Args = ""_s,
-        .Program = "cp {OUTPUT[0]} {OUTPUT[1]}"_s,
+        .Output = "sample/build/main.exe",
+        .Args = "",
+        .Program = "cp {OUTPUT[0]} {OUTPUT[1]}",
     });
 
 

@@ -750,6 +750,7 @@ struct target_list {
     u64 Count;
 
     target_list() = default;
+    target_list(const char *String);
     target_list(string String);
     target_list(target *Target);
 };
@@ -768,13 +769,19 @@ struct target {
     bool NeedsRebuild;
 };
 
-template <typename a, typename b, typename c>
+struct string_arg {
+    string Data;
+    string_arg() = default;
+    string_arg(const char* String) : Data(CreateString((char *)String)) {}
+    string_arg(string String) : Data(String) {}
+};
+
 struct target_args {
-    a Path;
+    string_arg Path;
     target_list Input;
     target_list Output;
-    b Args;
-    c Program;
+    string_arg Args;
+    string_arg Program;
     target_list Depends;
 };
 
