@@ -59,6 +59,10 @@ constexpr size_t ArrayCount(T(&)[n])
     (((Array)->Count == (Array)->Capacity) ? \
         ArrayExpand((void **)&(Array)->Data,&(Array)->Capacity, sizeof(*(Array)->Data)) : 0), (Array)->Data[(Array)->Count++] = Element)
 
+#define ArrayAddImpl(Data, Count, Capacity, Element) ( \
+    (((Count) == (Capacity)) ? \
+        ArrayExpand((void **)&(Data), &(Capacity), sizeof(*(Data))) : 0), (Data)[(Count++)] = (Element))
+
 void *ArrayExpand(void **Data, u64 *Capacity, u32 ElementSize) {
     if (*Capacity == 0) {
         *Capacity = 16;
@@ -746,14 +750,73 @@ s32 OS_RunProcess(string Program, string *Args, s32 ArgCount) {
 struct target;
 
 struct target_list {
-    target **Elements;
+    target **Data;
+    u64 Capacity;
     u64 Count;
 
     target_list() = default;
-    target_list(const char *String);
-    target_list(string String);
+    target_list(string_arg String);
     target_list(target *Target);
 };
+
+
+void ListAdd(target_list *List, string_arg String) {
+    target *T = Target({ .Path = String.Data });
+    ArrayAddImpl(List->Data, List->Count, List->Capacity, T);
+}
+void ListAdd(target_list *List, target *Target) {
+    if (Target->Output.Count) {
+        for (u64 i = 0; i < Target->Output.Count; i += 1) {
+            ArrayAddImpl(List->Data, List->Count, List->Capacity, Target->Output.Data[i]);
+        }
+    }
+    else {
+        ArrayAddImpl(List->Data, List->Count, List->Capacity, Target);
+    }
+}
+
+target_list::target_list(string_arg String) {
+    *this = {};
+    ListAdd(this, String.Data);
+}
+target_list::target_list(target *Target) {
+    *this = {};
+    ListAdd(this, Target);
+}
+
+template<typename... args>
+target_list List(args&&... Args) {
+    target_list List = {};
+    (ListAdd(&List, forward<args>(Args)), ...);
+    return List;
+}
+
+struct string_list {
+    string *Data;
+    u64 Capacity;
+    u64 Count;
+
+    string_list() = default;
+    string_list(string_arg String);
+    string_list(string_arg String);
+};
+
+string_list Flags = {};
+
+void StringListAdd(string_list *Array, string_arg String) {
+    ArrayAdd(Array, String);
+}
+void StringListAdd(string_list *Array, string_list StringArray) {
+    for (u64 i = 0; i < StringArray.Count; i += 1) {
+        ArrayAdd(Array, StringArray.Data[i]);
+    }
+}
+
+template<typename... args>
+void PushFlags(args&&... Args) {
+    (StringListAdd(&Flags, forward<args>(Args)), ...);
+}
+
 
 struct target {
     string Path;
@@ -762,7 +825,7 @@ struct target {
 
     target_list Input;
     target_list Output;
-    string Args;
+    string_list Args;
     string Program;
     target_list Depends;
 
@@ -780,7 +843,7 @@ struct target_args {
     string_arg Path;
     target_list Input;
     target_list Output;
-    string_arg Args;
+    string_list Args;
     string_arg Program;
     target_list Depends;
 };
@@ -788,6 +851,7 @@ struct target_args {
 struct state {
     target Targets[10000];
     u64 TargetCount;
+    bool ForceRebuild;
     string Errors[10000];
     u64 ErrorCount;
     string ProjectRoot;

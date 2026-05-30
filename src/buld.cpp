@@ -11,62 +11,16 @@ target *Target(target_args Value = {}) {
         .Args = Value.Args.Data,
         .Program = Value.Program.Data,
         .Depends = Value.Depends,
+        .NeedsRebuild = State.ForceRebuild,
     };
     for (u64 i = 0; i < Result->Output.Count; i += 1) {
         //TODO: Dedupe with things in depends or things already in input? Or rely on caller to do this.
         assert(Result->Program.Length);
-        target *Output = Result->Output.Elements[i];
+        target *Output = Result->Output.Data[i];
         assert(!Output->ParentCommand);
         Output->ParentCommand = Result;
     }
     return Result;
-}
-
-void ListAdd(target_list *List, const char *String) {
-    List->Elements[List->Count++] = Target({ .Path = CreateString((char *)String) });
-}
-void ListAdd(target_list *List, string String) {
-    List->Elements[List->Count++] = Target({ .Path = String });
-}
-void ListAdd(target_list *List, target *Target) {
-    if (Target->Output.Count) {
-        for (u64 i = 0; i < Target->Output.Count; i += 1) {
-            List->Elements[List->Count++] = Target->Output.Elements[i];
-        }
-    }
-    else {
-        List->Elements[List->Count++] = Target;
-    }
-}
-
-target_list::target_list(const char *String) {
-    Count = 0;
-    Elements = PushArray(1, target *);
-    ListAdd(this, CreateString((char *)String));
-}
-target_list::target_list(string String) {
-    Count = 0;
-    Elements = PushArray(1, target *);
-    ListAdd(this, String);
-}
-target_list::target_list(target *Target) {
-    Count = 0;
-    if (Target->Output.Count) {
-        Elements = PushArray(Target->Output.Count, target *);
-    }
-    else {
-        Elements = PushArray(1, target *);
-    }
-    ListAdd(this, Target);
-}
-
-template<typename... args>
-target_list List(args&&... Args) {
-    u64 ArgCount = sizeof...(Args);
-    target_list List = {};
-    List.Elements = PushArray(ArgCount, target *),
-    (ListAdd(&List, forward<args>(Args)), ...);
-    return List;
 }
 
 string TargetString(target *Target) {
@@ -82,10 +36,26 @@ string TargetListString(target_list *List) {
             StringListAppend(&StringList, " ");
         }
 
-        string String = TargetString(List->Elements[i]);
+        string String = TargetString(List->Data[i]);
         StringListAppend(&StringList, String);
     }
     return StringListJoin(&StringList);
+}
+
+target NullTarget = {};
+
+target *FindTarget(string Name) {
+    target *Result = 0;
+
+    for (u64 TargetIndex = 0; TargetIndex < State.TargetCount; TargetIndex += 1) {
+        target *T = &State.Targets[TargetIndex];
+        if (StringMatch(T->Path, Name)) {
+            Result = T;
+            break;
+        }
+    }
+
+    return Result;
 }
 
 string ProjectPath(string Path) {
@@ -107,14 +77,14 @@ build_result BuildTarget(target *Target) {
     }
     else {
         for (u64 TargetIndex = 0; TargetIndex < Target->Input.Count; TargetIndex += 1) {
-            target *Input = Target->Input.Elements[TargetIndex];
+            target *Input = Target->Input.Data[TargetIndex];
             build_result InputBuildResult = BuildTarget(Input);
             BuildResult.Error |= InputBuildResult.Error;
             BuildResult.NeedsRebuild |= InputBuildResult.NeedsRebuild;
             NewestInputTimestamp = Max(NewestInputTimestamp, Input->FileInfo.ModTime);
         }
         for (u64 TargetIndex = 0; TargetIndex < Target->Depends.Count; TargetIndex += 1) {
-            target *Dep = Target->Depends.Elements[TargetIndex];
+            target *Dep = Target->Depends.Data[TargetIndex];
             build_result DependsBuildResult = BuildTarget(Dep);
             BuildResult.Error |= DependsBuildResult.Error;
             BuildResult.NeedsRebuild |= DependsBuildResult.NeedsRebuild;
@@ -130,7 +100,7 @@ build_result BuildTarget(target *Target) {
         if (!BuildResult.NeedsRebuild) {
             u64 NewestOutputTimestamp = 0;
             for (u64 TargetIndex = 0; TargetIndex < Target->Output.Count; TargetIndex += 1) {
-                target *Output = Target->Output.Elements[TargetIndex];
+                target *Output = Target->Output.Data[TargetIndex];
                 assert(Output->Path.Length);
                 os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
                 if (FileInfo.Exists) {
@@ -154,7 +124,7 @@ build_result BuildTarget(target *Target) {
             State.CommandsToRun[State.CommandsToRunCount++] = Target;
 
             for (u64 TargetIndex = 0; TargetIndex < Target->Output.Count; TargetIndex += 1) {
-                target *Output = Target->Output.Elements[TargetIndex];
+                target *Output = Target->Output.Data[TargetIndex];
                 assert(Output->Path.Length);
 
                 // We have to also set NeedsRebuild here otherwise root level commands outputs wont be set
@@ -189,7 +159,7 @@ void WriteGraphNode(FILE *File, target *Target) {
     }
     else {
         for (u64 TargetIndex = 0; TargetIndex < Target->Input.Count; TargetIndex += 1) {
-            target *Input = Target->Input.Elements[TargetIndex];
+            target *Input = Target->Input.Data[TargetIndex];
             WriteGraphNode(File, Input);
             fprintf(File, "x%p -> x%p\n", (void *)Input, (void *)Target);
         }
@@ -211,7 +181,7 @@ void WriteGraphNode(FILE *File, target *Target) {
 
 
     for (u64 TargetIndex = 0; TargetIndex < Target->Output.Count; TargetIndex += 1) {
-        target *Output = Target->Output.Elements[TargetIndex];
+        target *Output = Target->Output.Data[TargetIndex];
         fprintf(File, "x%p -> x%p\n", (void *)Target, (void *)Output);
         // Print this (sometimes again) because the main programs outputs wont get labels otherwise
         fprintf(File, "x%p [label=\"%.*s\", shape=ellipse", (void *)Output, StrArg(Output->Path));
@@ -247,7 +217,7 @@ string ReplaceVariable(string VariableString, string VariableName, target_list *
                 PushError("Error: subscript out of bounds (count: %lu) for variable '%.*s'\n", TargetList->Count, StrArg(VariableString));
             }
             else {
-                Replacement = TargetString(TargetList->Elements[ParsedIndex.Value]);
+                Replacement = TargetString(TargetList->Data[ParsedIndex.Value]);
             }
         }
         else {
@@ -390,7 +360,7 @@ s32 RunBuildCommands()
         ReturnCode = OS_RunProcess(Program, ArgList.Data, ArgList.Count);
         if (ReturnCode == 0) {
             for (u64 OutputIndex = 0; OutputIndex < Target->Output.Count; OutputIndex += 1) {
-                target *Output = Target->Output.Elements[OutputIndex];
+                target *Output = Target->Output.Data[OutputIndex];
                 assert(Output->Path.Length);
                 os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
                 if (!FileInfo.Exists) {
@@ -504,8 +474,18 @@ target_list ParseDependencyFile(string String) {
     return List;
 }
 
+enum build_mode {
+    BuildMode_Debug,
+    BuildMode_Release,
+};
+
 int main(int ArgCount, char **Args) {
     string GraphPath = {};
+    bool ForceRebuild = false;
+    build_mode BuildMode = BuildMode_Debug;
+
+    array(string) BuildTargets = {};
+
     for (s32 ArgIndex = 1; ArgIndex < ArgCount; ArgIndex += 1) {
         string Arg = CreateString(Args[ArgIndex]);
         if (StringMatch(Arg, Strlit("--graph"))) {
@@ -513,8 +493,25 @@ int main(int ArgCount, char **Args) {
             if (ArgIndex < ArgCount) {
                 GraphPath = CreateString(Args[ArgIndex]);
             }
+            else {
+                fprintf(stderr, "Error: missing value for arg --graph.\n");
+                return 1;
+            }
+        }
+        else if (StringMatch(Arg, Strlit("--force"))) {
+            ForceRebuild = true;
+        }
+        else if (StringMatch(Arg, Strlit("--release"))) {
+            BuildMode = BuildMode_Release;
+        }
+        else if (StringMatch(Arg, Strlit("--debug"))) {
+            BuildMode = BuildMode_Debug;
+        }
+        else {
+            ArrayAdd(&BuildTargets, Arg);
         }
     }
+
 
     // Ideas:
     // * PushFlags()
@@ -525,9 +522,19 @@ int main(int ArgCount, char **Args) {
     // * Get true source -> target list
     // * Maybe Dir("bin/") to push and pop build dir
     // * Line/file numbers for errors, maybe uses C++ source location or macros
+    // * Embedding
 
 
     State.ProjectRoot = Strlit("/home/mac/projects/buld/");
+    State.ForceRebuild = ForceRebuild;
+
+    if (BuildMode == BuildMode_Debug) {
+        PushFlags("-g", Strlit("-O0"));
+    }
+    else if (BuildMode == BuildMode_Release) {
+        PushFlags("-O3");
+    }
+
 
     //target *GenSrc = Target({
     //    .Input = "sample/gen-src.txt",
@@ -536,7 +543,7 @@ int main(int ArgCount, char **Args) {
     //    .Program = "gener",
     //});
     //target *GenObj = Target({
-    //    .Input = GenSrc, // GenSrc->Output.Elements[0],
+    //    .Input = GenSrc, // GenSrc->Output.Data[0],
     //    .Output = "sample/build/gen-src.o",
     //    .Args = "-c {INPUT} -o {OUTPUT} -g",
     //    .Program = "compiler",
@@ -568,47 +575,62 @@ int main(int ArgCount, char **Args) {
     });
 
     target *Exe = Target({
-        .Input = List(Main->Output.Elements[0], File1),
+        .Input = List(Main->Output.Data[0], File1),
         .Output = "sample/build/main.exe",
         .Args = "-o {OUTPUT} {INPUT}",
         .Program = "clang++",
     });
 
-    target *Mkdir = Target({
+    target *StageDir = Target({
         .Output = "sample/stage",
         .Args = "-p {OUTPUT}",
         .Program = "mkdir",
     });
 
-    target *Cp = Target({
-        .Input = List(Exe, Mkdir),
+    Target({
+        .Input = List(Exe, StageDir),
         .Output = "sample/build/main.exe",
         .Args = "",
-        .Program = "cp {OUTPUT[0]} {OUTPUT[1]}",
+        .Program = "cp {OUTPUT[0]} {OUTPUT[1]}/.",
     });
 
-
+    if (BuildTargets.Count == 0) {
+        ArrayAdd(&BuildTargets, Strlit("sample/build/main.exe"));
+    }
 
     s32 ReturnCode = 0;
 
-    build_result BuildResult = BuildTarget(Exe);
-    if (BuildResult.Error) {
-        ReturnCode = 1;
+    FILE *GraphFile = 0;
+    if (GraphPath.Length) {
+        // TODO: No fopen and real string handling
+        FILE *GraphFile = fopen((char *)GraphPath.Str, "wb");
+        if (!GraphFile) {
+            fprintf(stderr, "Error: failed to open --graph file %.*s. %s\n", StrArg(GraphPath), strerror(errno));
+            return 1;
+        }
     }
-    else {
-        if (GraphPath.Length) {
-            // TODO: No fopen and real string handling
-            FILE *File = fopen((char *)GraphPath.Str, "wb");
-            if (File) {
-                WriteGraph(File, Exe);
-            }
-            else {
-                assert(0);
-            }
+
+    for (u64 TargetIndex = 0; TargetIndex < BuildTargets.Count; TargetIndex += 1) {
+        string TargetName = BuildTargets.Data[TargetIndex];
+        target *Target = FindTarget(TargetName);
+        if (Target == &NullTarget) {
+            fprintf(stderr, "Error: unknown target '%.*s'\n", StrArg(TargetName));
+            return 1;
         }
-        else {
-            ReturnCode = RunBuildCommands();
+
+        build_result BuildResult = BuildTarget(Target);
+        if (BuildResult.Error) {
+            ReturnCode = 1;
+            break;
         }
+
+        if (GraphFile) {
+            WriteGraph(GraphFile, Exe);
+        }
+    }
+
+    if (ReturnCode != 0) {
+        ReturnCode = RunBuildCommands();
     }
 
     for (u64 ErrorIndex = 0; ErrorIndex < State.ErrorCount; ErrorIndex += 1) {
