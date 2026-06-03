@@ -749,85 +749,54 @@ s32 OS_RunProcess(string Program, string *Args, s32 ArgCount) {
 
 struct target;
 
-struct target_list {
-    target **Data;
-    u64 Capacity;
+template<typename t>
+struct list;
+
+template<typename t>
+void ListAdd(list<t> *List, t Value);
+
+template<typename t>
+struct list {
+    t *Data;
     u64 Count;
-
-    target_list() = default;
-    target_list(string_arg String);
-    target_list(target *Target);
-};
-
-
-void ListAdd(target_list *List, string_arg String) {
-    target *T = Target({ .Path = String.Data });
-    ArrayAddImpl(List->Data, List->Count, List->Capacity, T);
-}
-void ListAdd(target_list *List, target *Target) {
-    if (Target->Output.Count) {
-        for (u64 i = 0; i < Target->Output.Count; i += 1) {
-            ArrayAddImpl(List->Data, List->Count, List->Capacity, Target->Output.Data[i]);
-        }
-    }
-    else {
-        ArrayAddImpl(List->Data, List->Count, List->Capacity, Target);
-    }
-}
-
-target_list::target_list(string_arg String) {
-    *this = {};
-    ListAdd(this, String.Data);
-}
-target_list::target_list(target *Target) {
-    *this = {};
-    ListAdd(this, Target);
-}
-
-template<typename... args>
-target_list List(args&&... Args) {
-    target_list List = {};
-    (ListAdd(&List, forward<args>(Args)), ...);
-    return List;
-}
-
-struct string_list {
-    string *Data;
     u64 Capacity;
-    u64 Count;
 
-    string_list() = default;
-    string_list(string_arg String);
-    string_list(string_arg String);
-};
+    list() = default;
+    //list(const list &Other) : Data(Other.Data), Count(Other.Count), Capacity(Other.Capacity) {
+    //    int y = 1;
+    //};
+    //list &operator=(const list &Other) {
+    //    Data = Other.Data;
+    //    Count = Other.Count;
+    //    Capacity = Other.Capacity;
+    //    return *this;
+    //};
+    //list(list &&Other) : Data(Other.Data), Count(Other.Count), Capacity(Other.Capacity) {
+    //    int y = 1;
+    //};
+    //list &operator=(list &&Other) {
+    //    Data = Other.Data;
+    //    Count = Other.Count;
+    //    Capacity = Other.Capacity;
+    //    return *this;
+    //};
 
-string_list Flags = {};
-
-void StringListAdd(string_list *Array, string_arg String) {
-    ArrayAdd(Array, String);
-}
-void StringListAdd(string_list *Array, string_list StringArray) {
-    for (u64 i = 0; i < StringArray.Count; i += 1) {
-        ArrayAdd(Array, StringArray.Data[i]);
+    template<typename... args>
+    list(args&&... Args) : Data(0), Count(0), Capacity(0) {
+        (ListAdd(this, forward<args>(Args)), ...);
     }
-}
-
-template<typename... args>
-void PushFlags(args&&... Args) {
-    (StringListAdd(&Flags, forward<args>(Args)), ...);
-}
-
+};
 
 struct target {
     string Path;
     os_file_info FileInfo;
     target *ParentCommand;
 
-    target_list Input;
-    target_list Output;
-    string_list Args;
+    list<target *> Input;
+    list<target *> Output;
+    list<string> Args;
     string Program;
-    target_list Depends;
+    list<target *> Depends;
 
     bool NeedsRebuild;
 };
@@ -841,11 +810,11 @@ struct string_arg {
 
 struct target_args {
     string_arg Path;
-    target_list Input;
-    target_list Output;
-    string_list Args;
+    list<target *> Input;
+    list<target *> Output;
+    list<string> Args;
     string_arg Program;
-    target_list Depends;
+    list<target *> Depends;
 };
 
 struct state {
@@ -860,6 +829,71 @@ struct state {
 };
 
 state State = {};
+
+target *Target(target Value = {}) {
+    target *Result = &State.Targets[State.TargetCount++];
+    *Result = Value;
+    for (u64 i = 0; i < Result->Output.Count; i += 1) {
+        //TODO: Dedupe with things in depends or things already in input? Or rely on caller to do this.
+        assert(Result->Program.Length);
+        target *Output = Result->Output.Data[i];
+        assert(!Output->ParentCommand);
+        Output->ParentCommand = Result;
+    }
+    return Result;
+}
+
+template<typename t>
+void ListEnsureCapacity(list<t> *List, u64 NewCount) {
+    if (NewCount > List->Capacity) {
+        List->Capacity = NewCount * 2;
+        if (List->Capacity < 16) {
+            List->Capacity = 16;
+        }
+        List->Data = (t *)realloc(List->Data, sizeof(t) * List->Capacity);
+    }
+}
+
+template<typename t>
+void ListAdd(list<t> *List, t Value) {
+    ListEnsureCapacity(List, List->Count + 1);
+    List->Data[List->Count++] = Value;
+}
+
+void ListAdd(list<target *> *List, const char *String) {
+    target *T = Target({ .Path = CreateString((char *)String) });
+    ListAdd(List, T);
+}
+void ListAdd(list<target *> *List, string String) {
+    target *T = Target({ .Path = String });
+    ListAdd(List, T);
+}
+void ListAdd(list<target *> *List, target *Target) {
+    // TODO: this might be a recursive call
+    if (Target->Output.Count) {
+        ListEnsureCapacity(List, List->Count + Target->Output.Count);
+        for (u64 i = 0; i < Target->Output.Count; i += 1) {
+            List->Data[List->Count++] = Target->Output.Data[i];
+        }
+    }
+    else {
+        ListEnsureCapacity(List, List->Count + 1);
+        List->Data[List->Count++] = Target;
+    }
+}
+void ListAdd(list<target *> *List, list<target *> &Other) {
+    for (u64 i = 0; i < Other.Count; i += 1) {
+        ListAdd(List, Other.Data[i]);
+    }
+}
+void ListAdd(list<string> *List, const char *String) {
+    ListAdd(List, CreateString((char *)String));
+}
+//void ListAdd(list<string> *List, list<string> StringList) {
+//    for (u64 i = 0; i < StringList.Count; i += 1) {
+//        ListAdd(List, StringList.Data[i]);
+//    }
+//}
 
 void PushError(string String) {
     State.Errors[State.ErrorCount++] = String;

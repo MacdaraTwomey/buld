@@ -1,35 +1,13 @@
 
 #include "buld.h"
 
-target *Target(target_args Value = {}) {
-    target *Result = &State.Targets[State.TargetCount++];
-    //*Result = Value;
-    *Result = {
-        .Path = Value.Path.Data,
-        .Input = Value.Input,
-        .Output = Value.Output,
-        .Args = Value.Args.Data,
-        .Program = Value.Program.Data,
-        .Depends = Value.Depends,
-        .NeedsRebuild = State.ForceRebuild,
-    };
-    for (u64 i = 0; i < Result->Output.Count; i += 1) {
-        //TODO: Dedupe with things in depends or things already in input? Or rely on caller to do this.
-        assert(Result->Program.Length);
-        target *Output = Result->Output.Data[i];
-        assert(!Output->ParentCommand);
-        Output->ParentCommand = Result;
-    }
-    return Result;
-}
-
 string TargetString(target *Target) {
     assert(Target->Path.Length);
     string String = Target->Path;
     return String;
 }
 
-string TargetListString(target_list *List) {
+string TargetListString(list<target *> *List) {
     s_list StringList = {};
     for (u64 i = 0; i < List->Count; i += 1) {
         if (i > 0) {
@@ -45,7 +23,7 @@ string TargetListString(target_list *List) {
 target NullTarget = {};
 
 target *FindTarget(string Name) {
-    target *Result = 0;
+    target *Result = &NullTarget;
 
     for (u64 TargetIndex = 0; TargetIndex < State.TargetCount; TargetIndex += 1) {
         target *T = &State.Targets[TargetIndex];
@@ -107,7 +85,7 @@ build_result BuildTarget(target *Target) {
                     NewestOutputTimestamp = Max(NewestOutputTimestamp, FileInfo.ModTime);
                 }
                 else {
-                    NewestOutputTimestamp = UINT64_MAX;
+                    NewestOutputTimestamp = 0;
                 }
                 Output->FileInfo = FileInfo;
             }
@@ -153,6 +131,19 @@ build_result BuildTarget(target *Target) {
     return BuildResult;
 }
 
+string ArgsToString(list<string> *List) {
+    s_list StringList = {};
+    for (u64 i = 0; i < List->Count; i += 1) {
+        if (i > 0) {
+            StringListAppend(&StringList, " ");
+        }
+
+        string String = List->Data[i];
+        StringListAppend(&StringList, String);
+    }
+    return StringListJoin(&StringList);
+}
+
 void WriteGraphNode(FILE *File, target *Target) {
     if (Target->ParentCommand) {
         WriteGraphNode(File, Target->ParentCommand);
@@ -166,10 +157,11 @@ void WriteGraphNode(FILE *File, target *Target) {
     }
 
     if (Target->Program.Length) {
-        fprintf(File, "x%p [label=\"%.*s %.*s\", shape=box", (void *)Target, StrArg(Target->Program), StrArg(Target->Args));
+        string Args = ArgsToString(&Target->Args);
+        fprintf(File, "x%p [label=\"%.*s %.*s time: %ld\", shape=box", (void *)Target, StrArg(Target->Program), StrArg(Args), Target->FileInfo.ModTime);
     }
     else if (Target->Path.Length) {
-        fprintf(File, "x%p [label=\"%.*s\", shape=ellipse", (void *)Target, StrArg(Target->Path));
+        fprintf(File, "x%p [label=\"%.*s time: %ld\", shape=ellipse", (void *)Target, StrArg(Target->Path), Target->FileInfo.ModTime);
     }
     else {
         assert(0);
@@ -184,7 +176,7 @@ void WriteGraphNode(FILE *File, target *Target) {
         target *Output = Target->Output.Data[TargetIndex];
         fprintf(File, "x%p -> x%p\n", (void *)Target, (void *)Output);
         // Print this (sometimes again) because the main programs outputs wont get labels otherwise
-        fprintf(File, "x%p [label=\"%.*s\", shape=ellipse", (void *)Output, StrArg(Output->Path));
+        fprintf(File, "x%p [label=\"%.*s time: %ld\", shape=ellipse", (void *)Output, StrArg(Output->Path), Target->FileInfo.ModTime);
         if (Output->NeedsRebuild) {
             fprintf(File, ", style=filled, fillcolor=orange");
         }
@@ -202,112 +194,181 @@ void WriteGraph(FILE *File, target *Target) {
     fprintf(File, "}\n");
 }
 
-string ReplaceVariable(string VariableString, string VariableName, target_list *TargetList) {
-    string Replacement = {};
-
-    u64 BracketIndex = VariableName.Length;
-    if (StringGetChar(VariableString, BracketIndex) == '[') {
-        if (VariableString.Str[VariableString.Length-1] == ']') {
-            string ArrayIndexStr = SubstrRange(VariableString, BracketIndex + 1, VariableString.Length-1);
-            parsed_num ParsedIndex = StringParseNum(ArrayIndexStr);
-            if (ParsedIndex.Error) {
-                PushError("Error: invalid subscript for variable '%.*s'\n", StrArg(VariableString));
-            }
-            else if (ParsedIndex.Value >= TargetList->Count) {
-                PushError("Error: subscript out of bounds (count: %lu) for variable '%.*s'\n", TargetList->Count, StrArg(VariableString));
-            }
-            else {
-                Replacement = TargetString(TargetList->Data[ParsedIndex.Value]);
-            }
-        }
-        else {
-            PushError("Error: invalid subscript for variable '%.*s'\n", StrArg(VariableString));
-        }
-    }
-    else {
-        if (TargetList->Count > 0) {
-            Replacement = TargetListString(TargetList);
-        }
-        else {
-            string TargetListType = {};
-            if (StringMatch(VariableName, Strlit("OUTPUT"))) {
-                TargetListType = Strlit("Output");
-            }
-            else if (StringMatch(VariableName, Strlit("INPUT"))) {
-                TargetListType = Strlit("Input");
-            }
-            else {
-                assert(0);
-            }
-            // TODO: Better error
-            PushError("Error: No %.*s defined for target\n", StrArg(TargetListType));
-        }
-    }
-
-    return Replacement;
-}
-
-struct replace_variables_result {
+struct var_parse_result {
+    string Variable;
+    u64 Index;
+    bool HasIndex;
     bool Error;
-    string String;
 };
 
-replace_variables_result ReplaceVariables(string String, target_list *Input, target_list *Output) {
-    replace_variables_result Result = {};
+var_parse_result ParseVariable(string String) {
+    var_parse_result Result = {};
 
-    s_list StringList = {};
-
-    for (u64 i = 0; i < String.Length;) {
-        u64 OpenBraceIndex = StringFind(String, '{', i);
-
-        string Part = SubstrRange(String, i, OpenBraceIndex);
-        StringListAppend(&StringList, Part);
-
-        if (OpenBraceIndex < String.Length) {
-            u64 CloseBraceIndex = StringFind(String, '}', OpenBraceIndex + 1);
-            if (CloseBraceIndex < String.Length) {
-                string VariableString = SubstrRange(String, OpenBraceIndex + 1, CloseBraceIndex);
-                string InputVar = Strlit("INPUT");
-                string OutputVar = Strlit("OUTPUT");
-                string Replacement = {};
-                if (StringStartsWith(VariableString, InputVar)) {
-                    Replacement = ReplaceVariable(VariableString, InputVar, Input);
-                }
-                else if (StringStartsWith(VariableString, OutputVar)) {
-                    Replacement = ReplaceVariable(VariableString, OutputVar, Output);
-                }
-                else {
-                    PushError("Error: Undefined variable '%.*s'\n", StrArg(VariableString));
-                }
-
-                if (Replacement.Length) {
-                    StringListAppend(&StringList, Replacement);
-                }
-                else {
-                    Result.Error = false;
-                    break;
-                }
+    // If target list contains multiple items makes makes multiple arguments and quotes each one
+    // if the variable is the entirety of
+    cut_result Cut = StringCut(String, Strlit("["));
+    if (Cut.Found) {
+        cut_result IndexPart = StringCut(Cut.After, Strlit("]"));
+        if (IndexPart.Found) {
+            parsed_num ParsedIndex = StringParseNum(IndexPart.Before);
+            if (ParsedIndex.Error) {
+                PushError("Error: invalid subscript for variable '%.*s'\n", StrArg(String));
+                Result.Error = true;
             }
             else {
-                StringListAppend(&StringList, SubstrRange(String, OpenBraceIndex, String.Length));
+                Result.HasIndex = true;
+                Result.Index = ParsedIndex.Value;
             }
-
-            i = CloseBraceIndex + 1;
         }
         else {
-            break;
+            PushError("Error: invalid subscript for variable '%.*s'\n", StrArg(String));
+            Result.Error = true;
         }
     }
-
-    if (!Result.Error) {
-        Result.String =  StringListJoin(&StringList);
-
-    }
+    Result.Variable = Cut.Before;
 
     return Result;
 }
 
-s32 RunBuildCommands()
+struct arg_iter {
+    string String;
+    u64 At;
+};
+
+struct arg_iter_item {
+    string String;
+    bool IsVariable;
+    bool Done;
+};
+
+// We force any opened and closed braces to contain variables, otherwise braces must be escaped
+arg_iter_item ArgIterNext(arg_iter *Iter) {
+    arg_iter_item Item = {};
+
+    // 01234{INPUT}ABC
+
+    if (Iter->At == Iter->String.Length) {
+        return {
+            .Done = true,
+        };
+    }
+
+    u64 Start = Iter->At;
+    u64 End = Iter->String.Length;
+    bool IsVariable = false;
+
+    for (; Iter->At < Iter->String.Length; Iter->At += 1) {
+        u8 c = Iter->String.Str[Iter->At];
+        if (c == '{') {
+            u64 CloseBraceIndex = StringFind(Iter->String, '}', Iter->At + 1);
+            if (CloseBraceIndex < Iter->String.Length) {
+                if (Iter->At == Start) {
+                    Start = Iter->At + 1;
+                    End = CloseBraceIndex;
+                    IsVariable = true;
+                    Iter->At = CloseBraceIndex + 1;
+                }
+                else {
+                    End = Iter->At;
+                }
+            }
+            else {
+                Iter->At = Iter->String.Length;
+            }
+            break;
+        }
+    }
+
+    return {
+        .String = SubstrRange(Iter->String, Start, End),
+        .IsVariable = IsVariable,
+    };
+}
+
+bool ProcessArg(list<string> *ArgList, string Arg, list<target *> *Input, list<target *> *Output) {
+    bool Ok = true;
+
+    // "{OUTPUT}" -> {'arg1', 'arg2', 'arg3'}
+    // "{OUTPUT}{INPUT}" -> {'arg1 arg2 arg3'}
+    // "--file={OUTPUT}" -> {'--file=arg1 arg2 arg3'}
+
+    arg_iter Iter = { .String = Arg };
+
+    s_list Builder = {};
+    for (arg_iter_item Item = ArgIterNext(&Iter); !Item.Done; Item = ArgIterNext(&Iter)) {
+        u64 UncountedLen = Item.IsVariable ? strlen("{}") : 0;
+        bool IsEntireArg = (Item.String.Length + UncountedLen) == Arg.Length;
+
+        if (Item.IsVariable) {
+            var_parse_result ParseResult = ParseVariable(Item.String);
+            if (ParseResult.Error) {
+                Ok = false;
+                break;
+            }
+
+            string MatchVar = {};
+            list<target *> *MatchList = 0;
+            if (StringMatch(ParseResult.Variable, Strlit("INPUT"))) {
+                MatchList = Input;
+            }
+            else if (StringMatch(ParseResult.Variable, Strlit("OUTPUT"))) {
+                MatchList = Output;
+            }
+            else {
+                PushError("Error: Undefined variable '%.*s'\n", StrArg(ParseResult.Variable));
+                Ok = false;
+                break;
+            }
+
+            if (ParseResult.HasIndex) {
+                if (ParseResult.Index >= MatchList->Count) {
+                    PushError("Error: variable '%.*s' subscript exceeds list count %lu.\n", StrArg(Item.String), MatchList->Count);
+                    Ok = false;
+                    break;
+                }
+
+                string Replacement = TargetString(MatchList->Data[ParseResult.Index]);
+                if (IsEntireArg) {
+                    ListAdd(ArgList, Replacement);
+                }
+                else {
+                    StringListAppend(&Builder, Replacement);
+                }
+            }
+            else {
+                for (u64 MatchListIndex = 0; MatchListIndex < MatchList->Count; MatchListIndex += 1) {
+                    string Replacement = TargetString(MatchList->Data[MatchListIndex]);
+                    if (IsEntireArg) {
+                        ListAdd(ArgList, Replacement);
+                    }
+                    else {
+                        if (MatchListIndex > 0) {
+                            StringListAppend(&Builder, Strlit(" "));
+                        }
+                        StringListAppend(&Builder, Replacement);
+                    }
+                }
+            }
+        }
+        else {
+            if (IsEntireArg) {
+                ListAdd(ArgList, Item.String);
+            }
+            else {
+                StringListAppend(&Builder, Item.String);
+            }
+        }
+    }
+
+    string JoinedArg = StringListJoin(&Builder);
+    if (JoinedArg.Length > 0) {
+        ListAdd(ArgList, JoinedArg);
+    }
+
+    return Ok;
+}
+
+s32 RunBuildCommands(bool DryRun)
 {
     s32 ReturnCode = 0;
 
@@ -318,57 +379,55 @@ s32 RunBuildCommands()
     for (u64 TargetIndex = 0; TargetIndex < State.CommandsToRunCount; TargetIndex += 1) {
         target *Target = State.CommandsToRun[TargetIndex];
 
+        list<string> SubstitutedArgList = {};
+
         // TODO: Maybe do this in BuildTarget?
-        string TemplateArgs = Target->Args;
-        replace_variables_result ReplaceVars = ReplaceVariables(TemplateArgs, &Target->Input, &Target->Output);
-        if (ReplaceVars.Error) {
-            ReturnCode = 1;
-            break;
-        }
-
-        string Args = ReplaceVars.String;
-
-        string Program = Target->Program;
-
-        // Probably need to support user passing invdividual args, if not make that the only way
-        // otherwise we need escaping, or ways for people to put things like apostropes in their args.
-        string_list ArgList = {};
-        arg_parser Parser = { .String = Args };
-
-        while (!Parser.Error) {
-            string Arg = GetArg(&Parser);
-            if (Arg.Length == 0) {
+        list<string> *ArgList = &Target->Args;
+        for (u64 ArgIndex = 0; ArgIndex < ArgList->Count; ArgIndex += 1) {
+            string Arg = ArgList->Data[ArgIndex];
+            bool Ok = ProcessArg(&SubstitutedArgList, Arg, &Target->Input, &Target->Output);
+            if (Ok) {
+                //SubstitutedArgList
+            }
+            else {
+                ReturnCode = 1;
                 break;
             }
-
-            ArrayAdd(&ArgList, Arg);
         }
 
-        if (Parser.Error) {
-            PushError("Error parsing command arguments '%.*s'\n", StrArg(Args));
-            ReturnCode = 1;
+        if (ReturnCode == 1) {
             break;
         }
 
-        printf("[%lu/%lu] %.*s %.*s\n", TargetIndex+1, State.CommandsToRunCount, StrArg(Program), StrArg(Args));
+        string ArgStr = ArgsToString(&SubstitutedArgList);
+        printf("[%lu/%lu] %.*s %.*s\n", TargetIndex+1, State.CommandsToRunCount, StrArg(Target->Program), StrArg(ArgStr));
 
         assert(Target->Output.Count);
         assert(Target->Program.Length);
 
         bool Error = false;
 
-        ReturnCode = OS_RunProcess(Program, ArgList.Data, ArgList.Count);
-        if (ReturnCode == 0) {
-            for (u64 OutputIndex = 0; OutputIndex < Target->Output.Count; OutputIndex += 1) {
-                target *Output = Target->Output.Data[OutputIndex];
-                assert(Output->Path.Length);
-                os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
-                if (!FileInfo.Exists) {
-                    PushError("File '%.*s' does not exist after build command\n", Target->Path);
-                    ReturnCode = 1;
-                    Error = true;
+        if (DryRun) {
+            for (u64 ArgIndex = 0; ArgIndex < SubstitutedArgList.Count; ArgIndex += 1) {
+                string Arg = SubstitutedArgList.Data[ArgIndex];
+                printf("'%.*s' ", StrArg(Arg));
+            }
+            printf("\n");
+        }
+        else {
+            ReturnCode = OS_RunProcess(Target->Program, SubstitutedArgList.Data, SubstitutedArgList.Count);
+            if (ReturnCode == 0) {
+                for (u64 OutputIndex = 0; OutputIndex < Target->Output.Count; OutputIndex += 1) {
+                    target *Output = Target->Output.Data[OutputIndex];
+                    assert(Output->Path.Length);
+                    os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
+                    if (!FileInfo.Exists) {
+                        PushError("File '%.*s' does not exist after build command\n", Target->Path);
+                        ReturnCode = 1;
+                        Error = true;
+                    }
+                    Output->FileInfo = FileInfo;
                 }
-                Output->FileInfo = FileInfo;
             }
         }
 
@@ -423,9 +482,9 @@ string UnEscapeMakeDependencyPath(string String) {
     return Unescaped;
 }
 
-target_list ParseDependencyFile(string String) {
+list<target *> ParseDependencyFile(string String) {
 
-    target_list List = {};
+    list<target *> List = {};
 
     // TODO: should we ensure the target of these matches what we expect
 
@@ -479,12 +538,26 @@ enum build_mode {
     BuildMode_Release,
 };
 
+//list<target *>::list<target *>(const char *String) {
+//    *this = {};
+//    ListAdd(this, CreateString((char *)String));
+//}
+//list<target *>::list<target *>(string String) {
+//    *this = {};
+//    ListAdd(this, String);
+//}
+//list<target *>::list<target *>(target *Target) {
+//    *this = {};
+//    ListAdd(this, Target);
+//}
+
 int main(int ArgCount, char **Args) {
     string GraphPath = {};
     bool ForceRebuild = false;
+    bool DryRun = false;
     build_mode BuildMode = BuildMode_Debug;
 
-    array(string) BuildTargets = {};
+    list<string> BuildTargets = {};
 
     for (s32 ArgIndex = 1; ArgIndex < ArgCount; ArgIndex += 1) {
         string Arg = CreateString(Args[ArgIndex]);
@@ -507,11 +580,19 @@ int main(int ArgCount, char **Args) {
         else if (StringMatch(Arg, Strlit("--debug"))) {
             BuildMode = BuildMode_Debug;
         }
+        else if (StringMatch(Arg, Strlit("--dry-run"))) {
+            DryRun = true;
+        }
         else {
-            ArrayAdd(&BuildTargets, Arg);
+            if (StringMatch(StringPrefix(Arg, 2), Strlit("--"))) {
+                fprintf(stderr, "Error: invalid optional argument '%.*s'.\n", StrArg(Arg));
+                return 1;
+            }
+            else {
+                ListAdd(&BuildTargets, Arg);
+            }
         }
     }
-
 
     // Ideas:
     // * PushFlags()
@@ -529,10 +610,10 @@ int main(int ArgCount, char **Args) {
     State.ForceRebuild = ForceRebuild;
 
     if (BuildMode == BuildMode_Debug) {
-        PushFlags("-g", Strlit("-O0"));
+        //PushFlags("-g", Strlit("-O0"));
     }
     else if (BuildMode == BuildMode_Release) {
-        PushFlags("-O3");
+        //PushFlags("-O3");
     }
 
 
@@ -557,41 +638,41 @@ int main(int ArgCount, char **Args) {
         return 1;
     }
 
-    target_list Headers = ParseDependencyFile(ReadResult.String);
+    list<target *> Headers = ParseDependencyFile(ReadResult.String);
 
     target *Main = Target({
-        .Input = "sample/main.cpp",
-        .Output = List("sample/build/main.o", "sample/build/main.d"),
-        .Args = "-c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]}",
-        .Program = "clang++",
+        .Input = Strlit("sample/main.cpp"),
+        .Output = {"sample/build/main.o", "sample/build/main.d"},
+        .Args = {"-c", "{INPUT}", "-o", "{OUTPUT[0]}", "-g", "-MMD", "-MF", "{OUTPUT[1]}"},
+        .Program = Strlit("clang++"),
         .Depends = Headers,
     });
 
     target *File1 = Target({
-        .Input = "sample/file1.cpp",
+        .Input = Strlit("sample/file1.cpp"),
         .Output = "sample/build/file1.o",
-        .Args = "-c {INPUT} -o {OUTPUT} -g -MMD",
-        .Program = "clang++",
+        .Args = {"-c", "{INPUT}", "-o", "{OUTPUT}", "-g", "-MMD"},
+        .Program = Strlit("clang++"),
     });
 
     target *Exe = Target({
-        .Input = List(Main->Output.Data[0], File1),
+        .Input = { Main->Output.Data[0], File1 },
         .Output = "sample/build/main.exe",
-        .Args = "-o {OUTPUT} {INPUT}",
-        .Program = "clang++",
+        .Args = {"-o", "{OUTPUT}", "{INPUT}"},
+        .Program = Strlit("clang++"),
     });
 
     target *StageDir = Target({
         .Output = "sample/stage",
-        .Args = "-p {OUTPUT}",
-        .Program = "mkdir",
+        .Args = {"-p", "{OUTPUT}"},
+        .Program = Strlit("mkdir"),
     });
 
     Target({
-        .Input = List(Exe, StageDir),
+        .Input = { Exe, StageDir },
         .Output = "sample/build/main.exe",
-        .Args = "",
-        .Program = "cp {OUTPUT[0]} {OUTPUT[1]}/.",
+        .Args = {"{OUTPUT[0]}", "{OUTPUT[1]}/."},
+        .Program = Strlit("cp"),
     });
 
     if (BuildTargets.Count == 0) {
@@ -603,7 +684,7 @@ int main(int ArgCount, char **Args) {
     FILE *GraphFile = 0;
     if (GraphPath.Length) {
         // TODO: No fopen and real string handling
-        FILE *GraphFile = fopen((char *)GraphPath.Str, "wb");
+        GraphFile = fopen((char *)GraphPath.Str, "wb");
         if (!GraphFile) {
             fprintf(stderr, "Error: failed to open --graph file %.*s. %s\n", StrArg(GraphPath), strerror(errno));
             return 1;
@@ -614,7 +695,7 @@ int main(int ArgCount, char **Args) {
         string TargetName = BuildTargets.Data[TargetIndex];
         target *Target = FindTarget(TargetName);
         if (Target == &NullTarget) {
-            fprintf(stderr, "Error: unknown target '%.*s'\n", StrArg(TargetName));
+            fprintf(stderr, "Error: unknown target '%.*s'.\n", StrArg(TargetName));
             return 1;
         }
 
@@ -625,12 +706,17 @@ int main(int ArgCount, char **Args) {
         }
 
         if (GraphFile) {
-            WriteGraph(GraphFile, Exe);
+            WriteGraph(GraphFile, Target);
         }
     }
 
-    if (ReturnCode != 0) {
-        ReturnCode = RunBuildCommands();
+    if (GraphFile) {
+        fclose(GraphFile);
+    }
+
+
+    if (ReturnCode == 0) {
+        ReturnCode = RunBuildCommands(DryRun);
     }
 
     for (u64 ErrorIndex = 0; ErrorIndex < State.ErrorCount; ErrorIndex += 1) {

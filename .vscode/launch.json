@@ -10,11 +10,15 @@
             "request": "launch",
             "program": "${workspaceFolder}/target/buld",
             //"args": "--graph graph.dot",
+            "args": "sample/build/main.exe",
             "cwd": "${workspaceFolder}",
             //"env": {"LD_LIBRARY_PATH": "target"},
             //"args": ["target/test"],
             "terminal": "integrated",
             //"preLaunchTask": "buildLinux",
+            "initCommands": [
+                "type summary add --summary-string \"len: ${var.Length} ${var.Str%s}\" string"
+            ]
         },
         {
             // This debugs programs compiled with clang.exe (and probably MSVC).
