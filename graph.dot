@@ -1,22 +1,26 @@
 strict digraph G {
-x0x5ba4e2a27220 [label="sample/main.cpp time: 1780138998", shape=ellipse]
-x0x5ba4e2a27220 -> x0x5ba4e2a27400
-x0x5ba4e2a27400 [label="clang++ -c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]} time: 0", shape=box]
-x0x5ba4e2a27400 -> x0x5ba4e2a272c0
-x0x5ba4e2a272c0 [label="sample/build/main.o time: 0", shape=ellipse]
-x0x5ba4e2a27400 -> x0x5ba4e2a27360
-x0x5ba4e2a27360 [label="sample/build/main.d time: 0", shape=ellipse]
-x0x5ba4e2a272c0 [label="sample/build/main.o time: 0", shape=ellipse]
-x0x5ba4e2a272c0 -> x0x5ba4e2a27720
-x0x5ba4e2a274a0 [label="sample/file1.cpp time: 1780128281", shape=ellipse]
-x0x5ba4e2a274a0 -> x0x5ba4e2a275e0
-x0x5ba4e2a275e0 [label="clang++ -c {INPUT} -o {OUTPUT} -g -MMD time: 0", shape=box]
-x0x5ba4e2a275e0 -> x0x5ba4e2a27540
-x0x5ba4e2a27540 [label="sample/build/file1.o time: 0", shape=ellipse]
-x0x5ba4e2a27540 [label="sample/build/file1.o time: 1780501118", shape=ellipse]
-x0x5ba4e2a27540 -> x0x5ba4e2a27720
-x0x5ba4e2a27720 [label="clang++ -o {OUTPUT} {INPUT} time: 0", shape=box, style=filled, fillcolor=orange]
-x0x5ba4e2a27720 -> x0x5ba4e2a27680
-x0x5ba4e2a27680 [label="sample/build/main.exe time: 0", shape=ellipse, style=filled, fillcolor=orange]
-x0x5ba4e2a27680 [label="sample/build/main.exe time: 0", shape=ellipse, style=filled, fillcolor=orange]
+x0x64d24063a230 [label="sample/main.cpp time: 1780587882", shape=ellipse]
+x0x64d24063a230 -> x0x64d24063a428
+x0x64d24063a0e0 [label="sample/main.cpp time: 1780587882", shape=ellipse]
+x0x64d24063a0e0 -> x0x64d24063a428 [style=dotted]
+x0x64d24063a188 [label="sample/file1.h time: 1780587882", shape=ellipse]
+x0x64d24063a188 -> x0x64d24063a428 [style=dotted]
+x0x64d24063a428 [label="clang++ -c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]} time: 0", shape=box, style=filled, fillcolor=orange]
+x0x64d24063a428 -> x0x64d24063a2d8
+x0x64d24063a2d8 [label="sample/build/main.o time: 0", shape=ellipse, style=filled, fillcolor=orange]
+x0x64d24063a428 -> x0x64d24063a380
+x0x64d24063a380 [label="sample/build/main.d time: 0", shape=ellipse, style=filled, fillcolor=orange]
+x0x64d24063a2d8 [label="sample/build/main.o time: 1780587206", shape=ellipse, style=filled, fillcolor=orange]
+x0x64d24063a2d8 -> x0x64d24063a770
+x0x64d24063a4d0 [label="sample/file1.cpp time: 1780587882", shape=ellipse]
+x0x64d24063a4d0 -> x0x64d24063a620
+x0x64d24063a620 [label="clang++ -c {INPUT} -o {OUTPUT} -g -MMD time: 0", shape=box, style=filled, fillcolor=orange]
+x0x64d24063a620 -> x0x64d24063a578
+x0x64d24063a578 [label="sample/build/file1.o time: 0", shape=ellipse, style=filled, fillcolor=orange]
+x0x64d24063a578 [label="sample/build/file1.o time: 1780587206", shape=ellipse, style=filled, fillcolor=orange]
+x0x64d24063a578 -> x0x64d24063a770
+x0x64d24063a770 [label="clang++ -o {OUTPUT} {INPUT} time: 0", shape=box, style=filled, fillcolor=orange]
+x0x64d24063a770 -> x0x64d24063a6c8
+x0x64d24063a6c8 [label="sample/build/main.exe time: 0", shape=ellipse, style=filled, fillcolor=orange]
+x0x64d24063a6c8 [label="sample/build/main.exe time: 0", shape=ellipse, style=filled, fillcolor=orange]
 }

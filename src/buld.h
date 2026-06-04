@@ -799,6 +799,7 @@ struct target {
     list<target *> Depends;
 
     bool NeedsRebuild;
+    u64 CommandDepth;
 };
 
 struct string_arg {

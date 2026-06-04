@@ -76,25 +76,23 @@ build_result BuildTarget(target *Target) {
 
     if (Target->Program.Length) {
         if (!BuildResult.NeedsRebuild) {
-            u64 NewestOutputTimestamp = 0;
             for (u64 TargetIndex = 0; TargetIndex < Target->Output.Count; TargetIndex += 1) {
                 target *Output = Target->Output.Data[TargetIndex];
                 assert(Output->Path.Length);
                 os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
+                u64 NewestOutputTimestamp = 0;
                 if (FileInfo.Exists) {
                     NewestOutputTimestamp = Max(NewestOutputTimestamp, FileInfo.ModTime);
                 }
-                else {
-                    NewestOutputTimestamp = 0;
-                }
                 Output->FileInfo = FileInfo;
-            }
 
-            if (NewestInputTimestamp > NewestOutputTimestamp) {
-                assert(!Target->Path.Length);
-                assert(Target->Output.Count);
-                assert(Target->Program.Length);
-                BuildResult.NeedsRebuild = true;
+                if (NewestInputTimestamp > NewestOutputTimestamp) {
+                    assert(!Target->Path.Length);
+                    assert(Target->Output.Count);
+                    assert(Target->Program.Length);
+                    BuildResult.NeedsRebuild = true;
+                    break;
+                }
             }
         }
 
@@ -153,6 +151,11 @@ void WriteGraphNode(FILE *File, target *Target) {
             target *Input = Target->Input.Data[TargetIndex];
             WriteGraphNode(File, Input);
             fprintf(File, "x%p -> x%p\n", (void *)Input, (void *)Target);
+        }
+        for (u64 TargetIndex = 0; TargetIndex < Target->Depends.Count; TargetIndex += 1) {
+            target *Depends = Target->Depends.Data[TargetIndex];
+            WriteGraphNode(File, Depends);
+            fprintf(File, "x%p -> x%p [style=dotted]\n", (void *)Depends, (void *)Target);
         }
     }
 
@@ -239,6 +242,7 @@ struct arg_iter_item {
     string String;
     bool IsVariable;
     bool Done;
+    bool IsEntireArg;
 };
 
 // We force any opened and closed braces to contain variables, otherwise braces must be escaped
@@ -253,6 +257,7 @@ arg_iter_item ArgIterNext(arg_iter *Iter) {
         };
     }
 
+    bool IsStart = Iter->At == 0;
     u64 Start = Iter->At;
     u64 End = Iter->String.Length;
     bool IsVariable = false;
@@ -282,6 +287,7 @@ arg_iter_item ArgIterNext(arg_iter *Iter) {
     return {
         .String = SubstrRange(Iter->String, Start, End),
         .IsVariable = IsVariable,
+        .IsEntireArg = IsStart && (Iter->At == Iter->String.Length),
     };
 }
 
@@ -296,9 +302,6 @@ bool ProcessArg(list<string> *ArgList, string Arg, list<target *> *Input, list<t
 
     s_list Builder = {};
     for (arg_iter_item Item = ArgIterNext(&Iter); !Item.Done; Item = ArgIterNext(&Iter)) {
-        u64 UncountedLen = Item.IsVariable ? strlen("{}") : 0;
-        bool IsEntireArg = (Item.String.Length + UncountedLen) == Arg.Length;
-
         if (Item.IsVariable) {
             var_parse_result ParseResult = ParseVariable(Item.String);
             if (ParseResult.Error) {
@@ -328,7 +331,7 @@ bool ProcessArg(list<string> *ArgList, string Arg, list<target *> *Input, list<t
                 }
 
                 string Replacement = TargetString(MatchList->Data[ParseResult.Index]);
-                if (IsEntireArg) {
+                if (Item.IsEntireArg) {
                     ListAdd(ArgList, Replacement);
                 }
                 else {
@@ -338,7 +341,7 @@ bool ProcessArg(list<string> *ArgList, string Arg, list<target *> *Input, list<t
             else {
                 for (u64 MatchListIndex = 0; MatchListIndex < MatchList->Count; MatchListIndex += 1) {
                     string Replacement = TargetString(MatchList->Data[MatchListIndex]);
-                    if (IsEntireArg) {
+                    if (Item.IsEntireArg) {
                         ListAdd(ArgList, Replacement);
                     }
                     else {
@@ -351,7 +354,7 @@ bool ProcessArg(list<string> *ArgList, string Arg, list<target *> *Input, list<t
             }
         }
         else {
-            if (IsEntireArg) {
+            if (Item.IsEntireArg) {
                 ListAdd(ArgList, Item.String);
             }
             else {
@@ -604,6 +607,7 @@ int main(int ArgCount, char **Args) {
     // * Maybe Dir("bin/") to push and pop build dir
     // * Line/file numbers for errors, maybe uses C++ source location or macros
     // * Embedding
+    // * Hash output files so they are only used in later commands if they actually changed?
 
 
     State.ProjectRoot = Strlit("/home/mac/projects/buld/");
