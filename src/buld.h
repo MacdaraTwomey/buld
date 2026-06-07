@@ -565,7 +565,7 @@ os_file_info OS_GetFileInfo(string Path) {
         Result.Ok = true;
     }
     else if (Rc == -1 && errno == ENOENT) {
-        Result.Ok = true;
+        Result.Ok = false;
     }
 
     return Result;
@@ -788,6 +788,7 @@ struct list {
 };
 
 struct target {
+    string Name;
     string Path;
     os_file_info FileInfo;
     target *ParentCommand;
@@ -834,6 +835,10 @@ state State = {};
 target *Target(target Value = {}) {
     target *Result = &State.Targets[State.TargetCount++];
     *Result = Value;
+    if (Result->Name.Length == 0) {
+        Result->Name = Result->Path;
+    }
+
     for (u64 i = 0; i < Result->Output.Count; i += 1) {
         //TODO: Dedupe with things in depends or things already in input? Or rely on caller to do this.
         assert(Result->Program.Length);

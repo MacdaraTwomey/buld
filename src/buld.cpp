@@ -27,7 +27,7 @@ target *FindTarget(string Name) {
 
     for (u64 TargetIndex = 0; TargetIndex < State.TargetCount; TargetIndex += 1) {
         target *T = &State.Targets[TargetIndex];
-        if (StringMatch(T->Path, Name)) {
+        if (StringMatch(T->Name, Name)) {
             Result = T;
             break;
         }
@@ -80,6 +80,7 @@ build_result BuildTarget(target *Target) {
                 target *Output = Target->Output.Data[TargetIndex];
                 assert(Output->Path.Length);
                 os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
+                assert(FileInfo.Ok); // TODO:
                 u64 NewestOutputTimestamp = 0;
                 if (FileInfo.Exists) {
                     NewestOutputTimestamp = Max(NewestOutputTimestamp, FileInfo.ModTime);
@@ -116,6 +117,7 @@ build_result BuildTarget(target *Target) {
             assert(Target->Input.Count == 0);
 
             os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Target->Path));
+            assert(FileInfo.Ok); // TODO:
             if (!FileInfo.Exists) {
                 PushError("File '%.*s' does not exist\n", StrArg(Target->Path));
                 BuildResult.Error = true;
@@ -673,8 +675,8 @@ int main(int ArgCount, char **Args) {
     });
 
     Target({
+        .Name = Strlit("copy"),
         .Input = { Exe, StageDir },
-        .Output = "sample/build/main.exe",
         .Args = {"{OUTPUT[0]}", "{OUTPUT[1]}/."},
         .Program = Strlit("cp"),
     });
