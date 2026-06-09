@@ -565,6 +565,9 @@ os_file_info OS_GetFileInfo(string Path) {
         Result.Ok = true;
     }
     else if (Rc == -1 && errno == ENOENT) {
+        Result.Ok = true;
+    }
+    else if (Rc == -1 && errno == ENOENT) {
         Result.Ok = false;
     }
 
@@ -801,6 +804,8 @@ struct target {
 
     bool NeedsRebuild;
     u64 CommandDepth;
+
+    u64 VisitCount;
 };
 
 struct string_arg {
@@ -837,6 +842,11 @@ target *Target(target Value = {}) {
     *Result = Value;
     if (Result->Name.Length == 0) {
         Result->Name = Result->Path;
+    }
+
+    // TODO: Maybe don't do this and just force users to do it?
+    if (Result->Program.Length > 0 && Result->Output.Count == 0) {
+        Result->NeedsRebuild = true;
     }
 
     for (u64 i = 0; i < Result->Output.Count; i += 1) {

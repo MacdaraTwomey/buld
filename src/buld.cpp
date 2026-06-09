@@ -46,8 +46,12 @@ struct build_result {
 };
 
 build_result BuildTarget(target *Target) {
-    build_result BuildResult = {};
+    build_result BuildResult = {
+        .NeedsRebuild = Target->NeedsRebuild,
+    };
     u64 NewestInputTimestamp = 0;
+
+    Target->VisitCount += 1;
 
     if (Target->ParentCommand) {
         assert(Target->Input.Count == 0);
@@ -86,8 +90,9 @@ build_result BuildTarget(target *Target) {
                     NewestOutputTimestamp = Max(NewestOutputTimestamp, FileInfo.ModTime);
                 }
                 Output->FileInfo = FileInfo;
+                Output->VisitCount += 1;
 
-                if (NewestInputTimestamp > NewestOutputTimestamp) {
+                if (!FileInfo.Exists || NewestInputTimestamp > NewestOutputTimestamp) {
                     assert(!Target->Path.Length);
                     assert(Target->Output.Count);
                     assert(Target->Program.Length);
@@ -145,57 +150,75 @@ string ArgsToString(list<string> *List) {
 }
 
 void WriteGraphNode(FILE *File, target *Target) {
-    if (Target->ParentCommand) {
-        WriteGraphNode(File, Target->ParentCommand);
-    }
-    else {
-        for (u64 TargetIndex = 0; TargetIndex < Target->Input.Count; TargetIndex += 1) {
-            target *Input = Target->Input.Data[TargetIndex];
-            WriteGraphNode(File, Input);
-            fprintf(File, "x%p -> x%p\n", (void *)Input, (void *)Target);
-        }
-        for (u64 TargetIndex = 0; TargetIndex < Target->Depends.Count; TargetIndex += 1) {
-            target *Depends = Target->Depends.Data[TargetIndex];
-            WriteGraphNode(File, Depends);
-            fprintf(File, "x%p -> x%p [style=dotted]\n", (void *)Depends, (void *)Target);
-        }
-    }
-
+    fprintf(File, "x%p [label=\"", (void *)Target);
     if (Target->Program.Length) {
         string Args = ArgsToString(&Target->Args);
-        fprintf(File, "x%p [label=\"%.*s %.*s time: %ld\", shape=box", (void *)Target, StrArg(Target->Program), StrArg(Args), Target->FileInfo.ModTime);
+        fprintf(File, "%.*s %.*s", StrArg(Target->Program), StrArg(Args));
     }
     else if (Target->Path.Length) {
-        fprintf(File, "x%p [label=\"%.*s time: %ld\", shape=ellipse", (void *)Target, StrArg(Target->Path), Target->FileInfo.ModTime);
+        fprintf(File, "%.*s", StrArg(Target->Path));
     }
     else {
         assert(0);
     }
-    if (Target->NeedsRebuild) {
+
+    time_t ModTime = (time_t)Target->FileInfo.ModTime;
+    struct tm *TimeInfo = localtime(&ModTime);
+    char Buffer[100] = {};
+    strftime(Buffer, sizeof(Buffer), "%H:%M:%S", TimeInfo);
+    fprintf(File, "\\nexist: %s, mod: %s, visit: %lu\"",
+            Target->FileInfo.Exists ? "yes" : "no",
+            ModTime == 0 ? "-" : Buffer,
+            Target->VisitCount);
+
+    if (Target->Program.Length) {
+        fprintf(File, ", shape=box");
+    }
+    else if (Target->Path.Length) {
+        fprintf(File, ", shape=ellipse");
+    }
+
+    if (Target->Path.Length && Target->VisitCount > 0 && !Target->FileInfo.Exists) {
+        fprintf(File, ", style=filled, fillcolor=coral2");
+    }
+    else if (Target->NeedsRebuild) {
         fprintf(File, ", style=filled, fillcolor=orange");
     }
-    fprintf(File, "]\n");
 
+    fprintf(File, "]\n");
+}
+
+void WriteGraphTarget(FILE *File, target *Target) {
+    if (Target->ParentCommand) {
+        WriteGraphTarget(File, Target->ParentCommand);
+    }
+    else {
+        for (u64 TargetIndex = 0; TargetIndex < Target->Input.Count; TargetIndex += 1) {
+            target *Input = Target->Input.Data[TargetIndex];
+            WriteGraphTarget(File, Input);
+            fprintf(File, "x%p -> x%p\n", (void *)Input, (void *)Target);
+        }
+        for (u64 TargetIndex = 0; TargetIndex < Target->Depends.Count; TargetIndex += 1) {
+            target *Depends = Target->Depends.Data[TargetIndex];
+            WriteGraphTarget(File, Depends);
+            fprintf(File, "x%p -> x%p [style=dotted]\n", (void *)Depends, (void *)Target);
+        }
+    }
+
+    WriteGraphNode(File, Target);
 
     for (u64 TargetIndex = 0; TargetIndex < Target->Output.Count; TargetIndex += 1) {
         target *Output = Target->Output.Data[TargetIndex];
         fprintf(File, "x%p -> x%p\n", (void *)Target, (void *)Output);
-        // Print this (sometimes again) because the main programs outputs wont get labels otherwise
-        fprintf(File, "x%p [label=\"%.*s time: %ld\", shape=ellipse", (void *)Output, StrArg(Output->Path), Target->FileInfo.ModTime);
-        if (Output->NeedsRebuild) {
-            fprintf(File, ", style=filled, fillcolor=orange");
-        }
-        fprintf(File, "]\n");
     }
 }
 
-void WriteGraph(FILE *File, target *Target) {
+void BeginGraph(FILE *File) {
     // strict makes it so two identical edges are only drawn once
     fprintf(File, "strict digraph G {\n");
-    //fprintf(File, "rankdir=BT;\n");
-    //fprintf(File, "subgraph code_block {\n");
-    WriteGraphNode(File, Target);
-    //fprintf(File, "}\n");
+}
+
+void EndGraph(FILE *File) {
     fprintf(File, "}\n");
 }
 
@@ -407,7 +430,6 @@ s32 RunBuildCommands(bool DryRun)
         string ArgStr = ArgsToString(&SubstitutedArgList);
         printf("[%lu/%lu] %.*s %.*s\n", TargetIndex+1, State.CommandsToRunCount, StrArg(Target->Program), StrArg(ArgStr));
 
-        assert(Target->Output.Count);
         assert(Target->Program.Length);
 
         bool Error = false;
@@ -543,6 +565,10 @@ enum build_mode {
     BuildMode_Release,
 };
 
+void RecompileBuld(string SourceFile, string ProgramName) {
+    os_file_info
+}
+
 //list<target *>::list<target *>(const char *String) {
 //    *this = {};
 //    ListAdd(this, CreateString((char *)String));
@@ -557,6 +583,9 @@ enum build_mode {
 //}
 
 int main(int ArgCount, char **Args) {
+
+    RecompileBuld(Strlit(__FILE__), Strlit("buld"));
+
     string GraphPath = {};
     bool ForceRebuild = false;
     bool DryRun = false;
@@ -677,7 +706,7 @@ int main(int ArgCount, char **Args) {
     Target({
         .Name = Strlit("copy"),
         .Input = { Exe, StageDir },
-        .Args = {"{OUTPUT[0]}", "{OUTPUT[1]}/."},
+        .Args = {"{INPUT[0]}", "{INPUT[1]}/."},
         .Program = Strlit("cp"),
     });
 
@@ -686,16 +715,6 @@ int main(int ArgCount, char **Args) {
     }
 
     s32 ReturnCode = 0;
-
-    FILE *GraphFile = 0;
-    if (GraphPath.Length) {
-        // TODO: No fopen and real string handling
-        GraphFile = fopen((char *)GraphPath.Str, "wb");
-        if (!GraphFile) {
-            fprintf(stderr, "Error: failed to open --graph file %.*s. %s\n", StrArg(GraphPath), strerror(errno));
-            return 1;
-        }
-    }
 
     for (u64 TargetIndex = 0; TargetIndex < BuildTargets.Count; TargetIndex += 1) {
         string TargetName = BuildTargets.Data[TargetIndex];
@@ -710,16 +729,25 @@ int main(int ArgCount, char **Args) {
             ReturnCode = 1;
             break;
         }
-
-        if (GraphFile) {
-            WriteGraph(GraphFile, Target);
-        }
     }
 
-    if (GraphFile) {
+    if (GraphPath.Length) {
+        // TODO: No fopen and real string handling
+        FILE *GraphFile = fopen((char *)GraphPath.Str, "wb");
+        if (!GraphFile) {
+            fprintf(stderr, "Error: failed to open --graph file %.*s. %s\n", StrArg(GraphPath), strerror(errno));
+            return 1;
+        }
+
+        BeginGraph(GraphFile);
+        for (u64 TargetIndex = 0; TargetIndex < State.TargetCount; TargetIndex += 1) {
+            target *Target = State.Targets + TargetIndex;
+            WriteGraphTarget(GraphFile, Target);
+        }
+        EndGraph(GraphFile);
+
         fclose(GraphFile);
     }
-
 
     if (ReturnCode == 0) {
         ReturnCode = RunBuildCommands(DryRun);

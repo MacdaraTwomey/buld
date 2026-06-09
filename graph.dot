@@ -1,33 +1,114 @@
 strict digraph G {
-x0x57d6d104f250 [label="sample/main.cpp time: 1780587882", shape=ellipse]
-x0x57d6d104f250 -> x0x57d6d104f478
-x0x57d6d104f0e0 [label="sample/main.cpp time: 1780587882", shape=ellipse]
-x0x57d6d104f0e0 -> x0x57d6d104f478 [style=dotted]
-x0x57d6d104f198 [label="sample/file1.h time: 1780587882", shape=ellipse]
-x0x57d6d104f198 -> x0x57d6d104f478 [style=dotted]
-x0x57d6d104f478 [label="clang++ -c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]} time: 0", shape=box]
-x0x57d6d104f478 -> x0x57d6d104f308
-x0x57d6d104f308 [label="sample/build/main.o time: 0", shape=ellipse]
-x0x57d6d104f478 -> x0x57d6d104f3c0
-x0x57d6d104f3c0 [label="sample/build/main.d time: 0", shape=ellipse]
-x0x57d6d104f308 [label="sample/build/main.o time: 1780587883", shape=ellipse]
-x0x57d6d104f308 -> x0x57d6d104f810
-x0x57d6d104f530 [label="sample/file1.cpp time: 1780587882", shape=ellipse]
-x0x57d6d104f530 -> x0x57d6d104f6a0
-x0x57d6d104f6a0 [label="clang++ -c {INPUT} -o {OUTPUT} -g -MMD time: 0", shape=box]
-x0x57d6d104f6a0 -> x0x57d6d104f5e8
-x0x57d6d104f5e8 [label="sample/build/file1.o time: 0", shape=ellipse]
-x0x57d6d104f5e8 [label="sample/build/file1.o time: 1780587883", shape=ellipse]
-x0x57d6d104f5e8 -> x0x57d6d104f810
-x0x57d6d104f810 [label="clang++ -o {OUTPUT} {INPUT} time: 0", shape=box]
-x0x57d6d104f810 -> x0x57d6d104f758
-x0x57d6d104f758 [label="sample/build/main.exe time: 0", shape=ellipse]
-x0x57d6d104f758 [label="sample/build/main.exe time: 1780587883", shape=ellipse]
-x0x57d6d104f758 -> x0x57d6d104fa38
-x0x57d6d104f980 [label="mkdir -p {OUTPUT} time: 0", shape=box]
-x0x57d6d104f980 -> x0x57d6d104f8c8
-x0x57d6d104f8c8 [label="sample/stage time: 0", shape=ellipse]
-x0x57d6d104f8c8 [label="sample/stage time: 0", shape=ellipse]
-x0x57d6d104f8c8 -> x0x57d6d104fa38
-x0x57d6d104fa38 [label="cp {OUTPUT[0]} {OUTPUT[1]}/. time: 0", shape=box]
+x0x5e031b1c40f0 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c41b0 [label="sample/file1.h\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c4270 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c4270 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c4270 -> x0x5e031b1c44b0
+x0x5e031b1c40f0 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c40f0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c41b0 [label="sample/file1.h\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c41b0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c44b0 [label="clang++ -c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]}\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c44b0 -> x0x5e031b1c4330
+x0x5e031b1c44b0 -> x0x5e031b1c43f0
+x0x5e031b1c4330 [label="sample/build/main.o\nexist: yes, mod: 23:38:39, visit: 2", shape=ellipse]
+x0x5e031b1c4270 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c4270 -> x0x5e031b1c44b0
+x0x5e031b1c40f0 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c40f0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c41b0 [label="sample/file1.h\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c41b0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c44b0 [label="clang++ -c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]}\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c44b0 -> x0x5e031b1c4330
+x0x5e031b1c44b0 -> x0x5e031b1c43f0
+x0x5e031b1c43f0 [label="sample/build/main.d\nexist: yes, mod: 23:24:37, visit: 1", shape=ellipse]
+x0x5e031b1c4270 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c4270 -> x0x5e031b1c44b0
+x0x5e031b1c40f0 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c40f0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c41b0 [label="sample/file1.h\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c41b0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c44b0 [label="clang++ -c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]}\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c44b0 -> x0x5e031b1c4330
+x0x5e031b1c44b0 -> x0x5e031b1c43f0
+x0x5e031b1c4570 [label="sample/file1.cpp\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c4570 [label="sample/file1.cpp\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c4570 -> x0x5e031b1c46f0
+x0x5e031b1c46f0 [label="clang++ -c {INPUT} -o {OUTPUT} -g -MMD\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c46f0 -> x0x5e031b1c4630
+x0x5e031b1c4630 [label="sample/build/file1.o\nexist: yes, mod: 21:55:47, visit: 2", shape=ellipse]
+x0x5e031b1c4570 [label="sample/file1.cpp\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c4570 -> x0x5e031b1c46f0
+x0x5e031b1c46f0 [label="clang++ -c {INPUT} -o {OUTPUT} -g -MMD\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c46f0 -> x0x5e031b1c4630
+x0x5e031b1c4270 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c4270 -> x0x5e031b1c44b0
+x0x5e031b1c40f0 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c40f0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c41b0 [label="sample/file1.h\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c41b0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c44b0 [label="clang++ -c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]}\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c44b0 -> x0x5e031b1c4330
+x0x5e031b1c44b0 -> x0x5e031b1c43f0
+x0x5e031b1c4330 [label="sample/build/main.o\nexist: yes, mod: 23:38:39, visit: 2", shape=ellipse]
+x0x5e031b1c4330 -> x0x5e031b1c4870
+x0x5e031b1c4570 [label="sample/file1.cpp\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c4570 -> x0x5e031b1c46f0
+x0x5e031b1c46f0 [label="clang++ -c {INPUT} -o {OUTPUT} -g -MMD\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c46f0 -> x0x5e031b1c4630
+x0x5e031b1c4630 [label="sample/build/file1.o\nexist: yes, mod: 21:55:47, visit: 2", shape=ellipse]
+x0x5e031b1c4630 -> x0x5e031b1c4870
+x0x5e031b1c4870 [label="clang++ -o {OUTPUT} {INPUT}\nexist: no, mod: -, visit: 1", shape=box, style=filled, fillcolor=orange]
+x0x5e031b1c4870 -> x0x5e031b1c47b0
+x0x5e031b1c47b0 [label="sample/build/main.exe\nexist: yes, mod: 23:24:37, visit: 2", shape=ellipse, style=filled, fillcolor=orange]
+x0x5e031b1c4270 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c4270 -> x0x5e031b1c44b0
+x0x5e031b1c40f0 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c40f0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c41b0 [label="sample/file1.h\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c41b0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c44b0 [label="clang++ -c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]}\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c44b0 -> x0x5e031b1c4330
+x0x5e031b1c44b0 -> x0x5e031b1c43f0
+x0x5e031b1c4330 [label="sample/build/main.o\nexist: yes, mod: 23:38:39, visit: 2", shape=ellipse]
+x0x5e031b1c4330 -> x0x5e031b1c4870
+x0x5e031b1c4570 [label="sample/file1.cpp\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c4570 -> x0x5e031b1c46f0
+x0x5e031b1c46f0 [label="clang++ -c {INPUT} -o {OUTPUT} -g -MMD\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c46f0 -> x0x5e031b1c4630
+x0x5e031b1c4630 [label="sample/build/file1.o\nexist: yes, mod: 21:55:47, visit: 2", shape=ellipse]
+x0x5e031b1c4630 -> x0x5e031b1c4870
+x0x5e031b1c4870 [label="clang++ -o {OUTPUT} {INPUT}\nexist: no, mod: -, visit: 1", shape=box, style=filled, fillcolor=orange]
+x0x5e031b1c4870 -> x0x5e031b1c47b0
+x0x5e031b1c49f0 [label="mkdir -p {OUTPUT}\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c49f0 -> x0x5e031b1c4930
+x0x5e031b1c4930 [label="sample/stage\nexist: yes, mod: 21:44:04, visit: 2", shape=ellipse]
+x0x5e031b1c49f0 [label="mkdir -p {OUTPUT}\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c49f0 -> x0x5e031b1c4930
+x0x5e031b1c4270 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c4270 -> x0x5e031b1c44b0
+x0x5e031b1c40f0 [label="sample/main.cpp\nexist: yes, mod: 23:24:33, visit: 1", shape=ellipse]
+x0x5e031b1c40f0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c41b0 [label="sample/file1.h\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c41b0 -> x0x5e031b1c44b0 [style=dotted]
+x0x5e031b1c44b0 [label="clang++ -c {INPUT} -o {OUTPUT[0]} -g -MMD -MF {OUTPUT[1]}\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c44b0 -> x0x5e031b1c4330
+x0x5e031b1c44b0 -> x0x5e031b1c43f0
+x0x5e031b1c4330 [label="sample/build/main.o\nexist: yes, mod: 23:38:39, visit: 2", shape=ellipse]
+x0x5e031b1c4330 -> x0x5e031b1c4870
+x0x5e031b1c4570 [label="sample/file1.cpp\nexist: yes, mod: 23:44:42, visit: 1", shape=ellipse]
+x0x5e031b1c4570 -> x0x5e031b1c46f0
+x0x5e031b1c46f0 [label="clang++ -c {INPUT} -o {OUTPUT} -g -MMD\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c46f0 -> x0x5e031b1c4630
+x0x5e031b1c4630 [label="sample/build/file1.o\nexist: yes, mod: 21:55:47, visit: 2", shape=ellipse]
+x0x5e031b1c4630 -> x0x5e031b1c4870
+x0x5e031b1c4870 [label="clang++ -o {OUTPUT} {INPUT}\nexist: no, mod: -, visit: 1", shape=box, style=filled, fillcolor=orange]
+x0x5e031b1c4870 -> x0x5e031b1c47b0
+x0x5e031b1c47b0 [label="sample/build/main.exe\nexist: yes, mod: 23:24:37, visit: 2", shape=ellipse, style=filled, fillcolor=orange]
+x0x5e031b1c47b0 -> x0x5e031b1c4ab0
+x0x5e031b1c49f0 [label="mkdir -p {OUTPUT}\nexist: no, mod: -, visit: 1", shape=box]
+x0x5e031b1c49f0 -> x0x5e031b1c4930
+x0x5e031b1c4930 [label="sample/stage\nexist: yes, mod: 21:44:04, visit: 2", shape=ellipse]
+x0x5e031b1c4930 -> x0x5e031b1c4ab0
+x0x5e031b1c4ab0 [label="cp {INPUT[0]} {INPUT[1]}/.\nexist: no, mod: -, visit: 1", shape=box, style=filled, fillcolor=orange]
 }
