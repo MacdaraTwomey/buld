@@ -3,3 +3,4 @@ target/
 sample/build/
 graph.png
 project.sublime-workspace
+sample/stage/
