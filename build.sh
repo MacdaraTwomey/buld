@@ -14,7 +14,7 @@ if [[ $ArgCount != 1 ]] && [[ $ArgCount != 2 ]]; then echo "Usage: build.sh <os>
 if [[ $ArgCount == 2 ]]; then OutputPathType=$2; fi
 
 # ------------ Flags and sources -------------------------------------------------
-Source="$Root/src/buld.cpp"
+Source="$Root/buld.cpp"
 Include="-I $Root/src"
 CommonFlags="-DBASE_DEBUG=1"
 Executable=`basename $Root`

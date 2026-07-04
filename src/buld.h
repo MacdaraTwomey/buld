@@ -30,8 +30,19 @@ typedef int16_t  s16;
 typedef int32_t  s32;
 typedef int64_t  s64;
 
-#define Min(a, b) (((a) < (b)) ? (a) : (b))
-#define Max(a, b) (((a) > (b)) ? (a) : (b))
+
+#define Min(a, b) ((a) < (b) ? (a) : (b))
+#define Max(a, b) ((a) > (b) ? (a) : (b))
+#define Clamp(Value, Low, High) (((Value) < (Low)) ? (Low) : ((Value) > (High)) ? (High) : (Value))
+#define ClampTop(a, b)    Min((a), (b))
+#define ClampBottom(a, b) Max((a), (b))
+
+#define KB(n) ((n) * 1024LLU)
+#define MB(n) KB((n) * 1024LLU)
+#define GB(n) MB((n) * 1024LLU)
+#define TB(n) GB((n) * 1024LLU)
+
+#define Assert(cond) assert(cond)
 
 void *AllocSize(u64 Size) {
     return calloc(Size, 1);
@@ -90,38 +101,37 @@ typedef array(u8 *) zstring_list;
 
 #define Str(String) string{(sizeof(String)-1), (u8 *)String }
 
-string CreateString(u8 *Str, u64 Length) {
-    return { Length, Str };
+u64 StringLength(u8 *CString)
+{
+    u64 Length = 0;
+    while (*CString)
+    {
+        ++CString;
+        Length += 1;
+    }
+
+    return Length;
 }
 
-string CreateString(char *Str) {
-    return { strlen(Str), (u8 *)Str };
+string CreateString(u8 *CString)
+{
+    string Result;
+    Result.Str = CString;
+    Result.Length = StringLength(CString);
+    return Result;
 }
 
-string CreateString(u8 *Str) {
-    return { strlen((char *)Str), (u8 *)Str };
+string CreateString(char *CString)
+{
+    return CreateString((u8 *)CString);
 }
 
-string StringPrefix(string String, u64 Length) {
-    String.Length = Min(Length, String.Length);
-    return String;
-}
-
-string StringSkip(string String, u64 Length) {
-    u64 SkipLength = Min(Length, String.Length);
-    String.Length -= SkipLength;
-    String.Str += SkipLength; 
-    return String;
-}
-
-string SubstrRange(string String, u64 First, u64 OnePastLast) {
-    assert(OnePastLast >= First);
-    First = Min(First, String.Length);
-    OnePastLast = Min(OnePastLast, String.Length);
-    
-    String.Str += First;
-    String.Length = OnePastLast - First;
-    return String;
+string CreateString(u8 *StringData, u64 Length)
+{
+    string Result;
+    Result.Str = StringData;
+    Result.Length = Length;
+    return Result;
 }
 
 u8 StringGetChar(string String, u64 Index)
@@ -135,68 +145,218 @@ u8 StringGetChar(string String, u64 Index)
     return Result;
 }
 
-bool StringMatch(string A, string B) {
-    bool Match = A.Length == B.Length;
-    if (Match) {
-        for (u64 i = 0; i < A.Length; i += 1) {
-            if (A.Str[i] != B.Str[i]) {
-                Match = false;
-                break;
-            }
+bool IsUpper(u8 c)
+{
+    return (('A' <= c) && (c <= 'Z'));
+}
+
+bool IsLower(u8 c)
+{
+    return (('a' <= c) && (c <= 'z'));
+}
+
+bool IsAlpha(u8 c)
+{
+    return IsLower(c) || IsUpper(c);
+}
+
+bool IsNumber(u8 c)
+{
+    return (('0' <= c) && (c <= '9'));
+}
+
+bool IsAlphaNumeric(u8 c)
+{
+    return IsAlpha(c) || IsNumber(c);
+}
+
+bool IsWhitespace(u8 c)
+{
+    return (c == ' ' || c == '\r' || c == '\n' || c == '\t' || c == '\f' || c == '\v');
+}
+
+bool IsSlash(u8 c)
+{
+    return (c == '\\' || c == '/');
+}
+
+u8 ToUpper(u8 c)
+{
+    return IsLower(c) ? c - 32u : c;
+}
+
+u8 ToLower(u8 c)
+{
+    return IsUpper(c) ? c + 32u : c;
+}
+
+void StringToLower(string *String)
+{
+    for (u64 i = 0; i < String->Length; ++i)
+    {
+        String->Str[i] = ToLower(String->Str[i]);
+    }
+}
+
+void StringToUpper(string *String)
+{
+    for (u64 i = 0; i < String->Length; ++i)
+    {
+        String->Str[i] = ToUpper(String->Str[i]);
+    }
+}
+
+
+struct parsed_num
+{
+    u64 Value;
+    bool Error;
+};
+
+parsed_num StringParseNum(string String)
+{
+    parsed_num Result = {};
+    Result.Error = (String.Length == 0);
+
+    for (u64 i = 0; i < String.Length; ++i)
+    {
+        u8 c = String.Str[i];
+        if (!IsNumber(c))
+        {
+            Result.Value = 0;
+            Result.Error = true;
+            return Result;
+        };
+
+        u64 NewValue = (Result.Value * 10) + (c - '0');
+        if (NewValue < Result.Value)
+        {
+            Result.Value = 0;
+            Result.Error = true;
+            return Result;
+        }
+
+        Result.Value = NewValue;
+    }
+
+    return Result;
+}
+
+string StringPrefix(string String, u64 N)
+{
+    String.Length = ClampTop(N, String.Length);
+    return String;
+}
+
+string StringSuffix(string String, u64 N)
+{
+    u64 SuffixLength = Min(N, String.Length);
+    String.Str += (String.Length - SuffixLength);
+    String.Length = SuffixLength;
+    return String;
+}
+
+string SubstrRange(string String, u64 First, u64 OnePastLast)
+{
+    Assert(OnePastLast >= First);
+    //   v   v
+    // abcdef
+    First = ClampTop(First, String.Length);
+    OnePastLast = ClampTop(OnePastLast, String.Length);
+
+    String.Str += First;
+    String.Length = OnePastLast - First;
+    return String;
+}
+
+string Substr(string String, u64 First, u64 Length)
+{
+    return SubstrRange(String, First, First + Length);
+}
+
+string StringSkip(string String, u64 N)
+{
+    N = ClampTop(N, String.Length);
+    String.Str = String.Str + N;
+    String.Length -= N;
+    return String;
+}
+
+string StringChop(string String, u64 N)
+{
+    N = ClampTop(N, String.Length);
+    String.Length -= N;
+    return String;
+}
+
+u64 StringCountOccurence(string String, u8 Char)
+{
+    u64 Count = 0;
+    for (u64 i = 0; i < String.Length; ++i)
+    {
+        if (String.Str[i] == Char)
+        {
+            Count += 1;
         }
     }
 
-    return Match;
+    return Count;
 }
 
-bool StringStartsWith(string String, string PrefixString) {
-    return StringMatch(StringPrefix(String, PrefixString.Length), PrefixString);
-}
-
-
-u64 StringRFind(string String, u8 Char) {
-    u64 Index = String.Length;
-    for (u64 i = String.Length - 1; i != -1; i -= 1) {
-        if (String.Str[i] == Char) {
-            Index = i;
+// Offest has a default value of 0
+u64 StringFindChar(string String, u8 Char, u64 Offset=0)
+{
+    u64 Position = String.Length;
+    for (u64 i = Offset; i < String.Length; ++i)
+    {
+        if (String.Str[i] == Char)
+        {
+            Position = i;
             break;
         }
     }
 
-    return Index;
+    return Position;
 }
 
-u64 StringFind(string String, u8 Char, u64 Start = 0);
-u64 StringFind(string String, u8 Char, u64 Start) {
-    u64 Index = String.Length;
-    for (u64 i = Start; i < String.Length; i += 1) {
-        if (String.Str[i] == Char) {
-            Index = i;
+u64 StringFindLastChar(string String, u8 Char)
+{
+    u64 Position = String.Length;
+    for (u64 i = String.Length - 1; i != static_cast<u64>(-1); --i)
+    {
+        if (String.Str[i] == Char)
+        {
+            Position = i;
             break;
         }
     }
 
-    return Index;
+    return Position;
 }
 
-u64 StringFindStr(string Haystack, string Needle, u64 Start = 0);
 
-u64 StringFindStr(string Haystack, string Needle, u64 Start) {
-    Start = Min(Start, Haystack.Length);
+u64 StringFindStr(string Haystack, string Needle)
+{
     u64 Position = Haystack.Length;
 
-    if (Needle.Length > 0 && Haystack.Length >= Needle.Length) {
-        for (u64 i = Start; i < Haystack.Length - Needle.Length + 1; ++i) {
-            if (Needle.Str[0] == Haystack.Str[i]) {
+    if (Needle.Length > 0 && Haystack.Length >= Needle.Length)
+    {
+        for (u64 i = 0; i < Haystack.Length - Needle.Length + 1; ++i)
+        {
+            if (Needle.Str[0] == Haystack.Str[i])
+            {
                 bool Found = true;
-                for (u64 j = 1; j < Needle.Length; ++j) {
-                    if (Needle.Str[j] != Haystack.Str[i + j]) {
+                for (u64 j = 1; j < Needle.Length; ++j)
+                {
+                    if (Needle.Str[j] != Haystack.Str[i + j])
+                    {
                         Found = false;
                         break;
                     }
                 }
 
-                if (Found) {
+                if (Found)
+                {
                     Position = i;
                     break;
                 }
@@ -207,14 +367,82 @@ u64 StringFindStr(string Haystack, string Needle, u64 Start) {
     return Position;
 }
 
-u64 StringFindChar(string String, u8 Char, u64 Start=0);
-
-u64 StringFindChar(string String, u8 Char, u64 Start)
+bool StringContainsChar(string String, u8 Char)
 {
-    u64 Position = String.Length;
-    for (u64 i = Start; i < String.Length; ++i)
+    return StringFindChar(String, Char) < String.Length;
+}
+
+bool StringContainsStr(string String, string Substr)
+{
+    // O(n^2)
+    bool ContainsSubstr = false;
+    if (String.Length >= Substr.Length && Substr.Length > 0)
     {
-        if (String.Str[i] == Char)
+        u64 LastPossibleCharIndex = String.Length - Substr.Length;
+        for (u64 i = 0; i <= LastPossibleCharIndex; ++i)
+        {
+            if (String.Str[i] == Substr.Str[0])
+            {
+                ContainsSubstr = true;
+                for (u64 j = 1; j < Substr.Length; ++j)
+                {
+                    if (String.Str[i + j] != Substr.Str[j])
+                    {
+                        ContainsSubstr = false;
+                        break;
+                    }
+                }
+
+                if (ContainsSubstr) break;
+            }
+        }
+    }
+
+    return ContainsSubstr;
+}
+
+bool StringMatch(string A, string B)
+{
+    bool Result = (A.Length == B.Length);
+    if (Result)
+    {
+        for (u64 i = 0; i < A.Length; ++i)
+        {
+            if (A.Str[i] != B.Str[i])
+            {
+                Result = false;
+                break;
+            }
+        }
+    }
+
+    return Result;
+}
+
+bool StringMatchCaseInsensitive(string a, string b)
+{
+    bool Result = (a.Length == b.Length);
+    if (Result)
+    {
+        for (u64 i = 0; i < a.Length; ++i)
+        {
+            if (ToLower(a.Str[i]) != ToLower(b.Str[i]))
+            {
+                Result = false;
+                break;
+            }
+        }
+    }
+
+    return Result;
+}
+
+u64 StringFindLastSlash(string Path)
+{
+    u64 Position = Path.Length;
+    for (u64 i = Path.Length - 1; i != (u64)-1; --i)
+    {
+        if (IsSlash(Path.Str[i]))
         {
             Position = i;
             break;
@@ -222,6 +450,37 @@ u64 StringFindChar(string String, u8 Char, u64 Start)
     }
 
     return Position;
+}
+
+string RemoveExtension(string File)
+{
+    // Files can have multiple dots, and only last is the real extension.
+
+    // If no dot is found Length stays the same
+    u64 DotPosition = StringFindLastChar(File, '.');
+    return StringPrefix(File, DotPosition);
+}
+
+// If Path has no slashes (it is not an absolute path) then a zero length string is returned
+string FilenameFromPath(string Path)
+{
+    u64 LastSlash = StringFindLastSlash(Path);
+    Path = StringSkip(Path, LastSlash + 1);
+    return Path;
+}
+
+// If Path has no slashes then then a zero length string is returned
+// Includes slash after directory
+string DirectoryFromPath(string Path)
+{
+    string Directory = {};
+    u64 LastSlash = StringFindLastSlash(Path);
+    if (LastSlash < Path.Length)
+    {
+        Directory = StringPrefix(Path, LastSlash + 1);
+    }
+
+    return Directory;
 }
 
 struct cut_result {
@@ -250,10 +509,6 @@ cut_result StringCut(string String, string Separator) {
     }
 
     return Result;
-}
-
-string PathGetDir(string Path) {
-    return CreateString(Path.Str, StringRFind(Path, '/'));
 }
 
 template<typename... ts>
@@ -407,45 +662,6 @@ string FindReplace(string String, string MatchString, string ReplaceString) {
     return Result;
 }
 
-bool IsNumber(u8 c)
-{
-    return (('0' <= c) && (c <= '9'));
-}
-
-struct parsed_num
-{
-    u64 Value;
-    bool Error;
-};
-
-parsed_num StringParseNum(string String)
-{
-    parsed_num Result = {};
-    Result.Error = (String.Length == 0);
-
-    for (u64 i = 0; i < String.Length; ++i)
-    {
-        u8 c = String.Str[i];
-        if (!IsNumber(c))
-        {
-            Result.Value = 0;
-            Result.Error = true;
-            return Result;
-        };
-
-        u64 NewValue = (Result.Value * 10) + (c - '0');
-        if (NewValue < Result.Value)
-        {
-            Result.Value = 0;
-            Result.Error = true;
-            return Result;
-        }
-
-        Result.Value = NewValue;
-    }
-
-    return Result;
-}
 
 
 #if 0
@@ -542,13 +758,19 @@ constexpr T&& forward(remove_reference_t<T>&& t) noexcept {
 // OS
 //
 
+enum os_file_type {
+    OS_FileType_Invalid,
+    OS_FileType_File,
+    OS_FileType_Directory,
+};
+
 // TODO: Push an error if this fails
 typedef struct {
     s64 ModTime;
+    os_file_type Type;
     bool Exists;
     bool Ok;
 } os_file_info;
-
 
 os_file_info OS_GetFileInfo(string Path) {
     u8 ZPath[4096];
@@ -563,6 +785,8 @@ os_file_info OS_GetFileInfo(string Path) {
         Result.ModTime = Info.st_mtime;
         Result.Exists = true;
         Result.Ok = true;
+        // Treat everything thats not a directory as a file
+        Result.Type = S_ISDIR(Info.st_mode) ? OS_FileType_Directory : OS_FileType_File;
     }
     else if (Rc == -1 && errno == ENOENT) {
         Result.Ok = true;
@@ -574,33 +798,68 @@ os_file_info OS_GetFileInfo(string Path) {
     return Result;
 }
 
-string_list OS_ReadDir(string Path) {
-    u8 ZPath[4096];
-    memcpy(ZPath, Path.Str, Path.Length);
-    ZPath[Path.Length] = 0;
+struct os_directory_iterator {
+    void *Handle;
+};
 
-    string_list DirContents = {0};
 
-    DIR *Dir = opendir((char *)ZPath);
-    if (Dir) {
-        for (struct dirent *DirEntry = readdir(Dir); 
-             DirEntry; 
-             DirEntry = readdir(Dir)) {
-            u8 *Name = (u8 *)DirEntry->d_name;
-            if (((Name[0] == '.') && (Name[1] == 0)) || 
-                ((Name[0] == '.') && (Name[1] == '.') && (Name[2] == 0))) {
-                continue;
-            }
+struct os_filesystem_entry {
+    string Name;
+    os_file_type Type;
+};
 
-            string Entry = CreateString(Name);
-            ArrayAdd(&DirContents, Entry);
+os_directory_iterator OS_DirectoryIterator(string DirectoryPath) {
+
+    u8 *ZDirectoryPath = (u8 *)calloc(DirectoryPath.Length + 1, 1);
+    CopyString(ZDirectoryPath, DirectoryPath);
+
+    DIR *Dir = opendir((char *)ZDirectoryPath);
+    os_directory_iterator Iter = {
+        .Handle = (void *)Dir,
+    };
+
+    return Iter;
+}
+
+bool OS_DirectoryIteratorIsOk(os_directory_iterator Iter) {
+    return Iter.Handle != 0;
+}
+
+os_filesystem_entry OS_DirectoryIteratorNext(os_directory_iterator *Iter) {
+    os_filesystem_entry FilesystemEntry = {};
+    // TODO: This isn't very good, probably want to separate error and empty directory cases more clearly.
+
+    for (struct dirent *Entry = readdir((DIR *)Iter->Handle);
+         Entry != 0;
+         Entry = readdir((DIR *)Iter->Handle)) {
+        if ((Entry->d_name[0] == '.' && Entry->d_name[1] == 0) ||
+            (Entry->d_name[0] == '.' && Entry->d_name[1] == '.' && Entry->d_name[2] == 0)) {
+            continue;
         }
-    }
-    else {
-        fprintf(stderr, "Error opening %s. %s\n", ZPath, strerror(errno));
+
+        // Apparently not all files types support returning the type
+        if (Entry->d_type == DT_UNKNOWN) {
+            // TODO:
+            assert(!"Not handled yet");
+        }
+        else if (Entry->d_type == DT_DIR) {
+            FilesystemEntry.Type = OS_FileType_Directory;
+            FilesystemEntry.Name = PushStringf("%s/", Entry->d_name);
+        }
+        else {
+            FilesystemEntry.Type = OS_FileType_File;
+            FilesystemEntry.Name = PushStringf("%s", CreateString(Entry->d_name));
+        }
+
+        break;
     }
 
-    return DirContents;
+    return FilesystemEntry;
+}
+
+void OS_DirectoryIteratorClose(os_directory_iterator *Iter) {
+    closedir((DIR *)Iter->Handle);
+    *Iter = {};
 }
 
 struct read_entire_file_result {
@@ -649,51 +908,17 @@ read_entire_file_result OS_ReadEntireFile(string Path) {
     return Result;
 }
 
-struct arg_parser {
-    u64 At;
-    string String;
-    bool Error;
-};
+bool OS_ReplaceCurrentProcess(string ProgramPath, char **Argv) {
+    u8 *ZProgramPath = (u8 *)calloc(ProgramPath.Length + 1, 1);
+    CopyString(ZProgramPath, ProgramPath);
 
-string GetArg(arg_parser *Parser) {
-    u8 QuoteChar = 0;
-    u64 Start = Parser->String.Length;
-    u64 End = Parser->String.Length;
-    for (; Parser->At < Parser->String.Length; Parser->At += 1) {
-        u8 C = Parser->String.Str[Parser->At];
-        if (C != ' ') {
-            Start = Parser->At;
-            if (C == '\'' || C == '"') {
-                QuoteChar = C;
-                Parser->At += 1;
-            }
-            break;
-        }
+    int ExecResult = execv((char *)ZProgramPath, Argv);
+    if (ExecResult < 0) {
+        fprintf(stdout, "Failed to exec %.*s. %s", StrArg(ProgramPath), strerror(errno));
+        return false;
     }
 
-    bool QuotesClosed = (QuoteChar == 0);
-    for (; Parser->At < Parser->String.Length; Parser->At += 1) {
-        u8 C = Parser->String.Str[Parser->At];
-        if (QuoteChar) {
-            // TODO: Handle escaping
-            if (C == QuoteChar) {
-                Parser->At += 1;
-                End = Parser->At;
-                QuotesClosed = true;
-                break;
-            }
-        }
-        else if (C == ' ') {
-            End = Parser->At;
-            break;
-        }
-    }
-
-    if (!QuotesClosed) {
-        Parser->Error = true;
-    }
-
-    return SubstrRange(Parser->String, Start, End);
+    return true;
 }
 
 s32 OS_RunProcess(string Program, string *Args, s32 ArgCount) {
@@ -744,6 +969,25 @@ s32 OS_RunProcess(string Program, string *Args, s32 ArgCount) {
     }
 
     return ReturnCode;
+}
+
+string OS_GetCurrentExecutablePath() {
+    string ExecutablePath = {};
+
+    pid_t PID = getpid();
+
+    char ZPath[4096];
+    snprintf(ZPath, sizeof(ZPath), "/proc/%d/exe", PID);
+    // Allocates buffer that must be freed for you
+    char *ResolvedPath = realpath(ZPath, 0);
+    if (ResolvedPath) {
+        ExecutablePath = CreateString(ResolvedPath);
+    }
+    else {
+        fprintf(stdout, "Unable to resolve %s symlink. %s\n", ZPath, strerror(errno));
+    }
+
+    return ExecutablePath;
 }
 
 //-----------------------------------------------------------------------------
@@ -836,6 +1080,7 @@ struct state {
 };
 
 state State = {};
+target NullTarget = {};
 
 target *Target(target Value = {}) {
     target *Result = &State.Targets[State.TargetCount++];
@@ -857,6 +1102,39 @@ target *Target(target Value = {}) {
         Output->ParentCommand = Result;
     }
     return Result;
+}
+
+target *FindTarget(string Name) {
+    target *Result = &NullTarget;
+
+    for (u64 TargetIndex = 0; TargetIndex < State.TargetCount; TargetIndex += 1) {
+        target *T = &State.Targets[TargetIndex];
+        if (StringMatch(T->Name, Name)) {
+            Result = T;
+            break;
+        }
+    }
+
+    return Result;
+}
+
+string TargetString(target *Target) {
+    assert(Target->Path.Length);
+    string String = Target->Path;
+    return String;
+}
+
+string TargetListString(list<target *> *List) {
+    s_list StringList = {};
+    for (u64 i = 0; i < List->Count; i += 1) {
+        if (i > 0) {
+            StringListAppend(&StringList, " ");
+        }
+
+        string String = TargetString(List->Data[i]);
+        StringListAppend(&StringList, String);
+    }
+    return StringListJoin(&StringList);
 }
 
 template<typename t>
@@ -923,87 +1201,359 @@ void PushError(char *Format, ...) BASE_FORMAT_STRING_CHECK(1, 2) {
     PushError(Result);
 }
 
+string ArgsToString(list<string> *List) {
+    s_list StringList = {};
+    for (u64 i = 0; i < List->Count; i += 1) {
+        if (i > 0) {
+            StringListAppend(&StringList, " ");
+        }
 
-struct cmd_variable {
-    string Name;
-    string Value;
-};
-
-typedef array(cmd_variable) cmd_variable_array;
-
-static cmd_variable_array GlobalVariables = {};
-
-void DefineVariable(string Name, string Value) {
-    cmd_variable Var = {};
-    Var.Name = Name;
-    Var.Value = Value;
-    ArrayAdd(&GlobalVariables, Var);
+        string String = List->Data[i];
+        StringListAppend(&StringList, String);
+    }
+    return StringListJoin(&StringList);
 }
 
-struct get_variable_result {
-    string Value;
-    bool Found;
+string ProjectPath(string Path) {
+    return StringConcat(State.ProjectRoot, Path);
+}
+
+struct var_parse_result {
+    string Variable;
+    u64 Index;
+    bool HasIndex;
+    bool Error;
 };
 
-get_variable_result GetVariable(cmd_variable *Variables, u64 VariableCount, string Name) {
-    get_variable_result Result = {};
-    for (u64 i = 0; i < VariableCount; i += 1) {
-        cmd_variable Var = Variables[i];
-        if (StringMatch(Var.Name, Name)) {
-            Result.Value = Var.Value;
-            Result.Found = true;
-            break;
-        }
-    }
+var_parse_result ParseVariable(string String) {
+    var_parse_result Result = {};
 
-    if (!Result.Found) {
-        for (u64 i = 0; i < GlobalVariables.Count; i += 1) {
-            cmd_variable Var = GlobalVariables.Data[i];
-            if (StringMatch(Var.Name, Name)) {
-                Result.Value = Var.Value;
-                Result.Found = true;
-                break;
+    // If target list contains multiple items makes makes multiple arguments and quotes each one
+    // if the variable is the entirety of
+    cut_result Cut = StringCut(String, Strlit("["));
+    if (Cut.Found) {
+        cut_result IndexPart = StringCut(Cut.After, Strlit("]"));
+        if (IndexPart.Found) {
+            parsed_num ParsedIndex = StringParseNum(IndexPart.Before);
+            if (ParsedIndex.Error) {
+                PushError("Error: invalid subscript for variable '%.*s'\n", StrArg(String));
+                Result.Error = true;
+            }
+            else {
+                Result.HasIndex = true;
+                Result.Index = ParsedIndex.Value;
             }
         }
+        else {
+            PushError("Error: invalid subscript for variable '%.*s'\n", StrArg(String));
+            Result.Error = true;
+        }
     }
+    Result.Variable = Cut.Before;
 
     return Result;
 }
 
-string ReplaceVars(string String, cmd_variable *Variables, u64 VariableCount) {
-    u64 VariablesLength = 0;
-    for (u64 i = 0; i < VariableCount; i += 1) {
-        VariablesLength += Variables[i].Value.Length;
+struct buld_arg_iter {
+    string String;
+    u64 At;
+};
+
+struct buld_arg_iter_item {
+    string String;
+    bool IsVariable;
+    bool Done;
+    bool IsEntireArg;
+};
+
+// We force any opened and closed braces to contain variables, otherwise braces must be escaped
+buld_arg_iter_item BuldArgIterNext(buld_arg_iter *Iter) {
+    buld_arg_iter_item Item = {};
+
+    // 01234{INPUT}ABC
+
+    if (Iter->At == Iter->String.Length) {
+        return {
+            .Done = true,
+        };
     }
 
-    // TODO: Find a better way
-    for (u64 i = 0; i < GlobalVariables.Count; i += 1) {
-        VariablesLength += GlobalVariables.Data[i].Value.Length;
-    }
+    bool IsStart = Iter->At == 0;
+    u64 Start = Iter->At;
+    u64 End = Iter->String.Length;
+    bool IsVariable = false;
 
-    u8 *Buffer = (u8 *)calloc(VariablesLength + String.Length, 1);
-    u64 Length = 0;
-    for (u64 i = 0; i < String.Length; i += 1) {
-        u8 c = String.Str[i];
+    for (; Iter->At < Iter->String.Length; Iter->At += 1) {
+        u8 c = Iter->String.Str[Iter->At];
         if (c == '{') {
-            u64 CloseBraceIndex = StringFind(String, '}', i);
-            if (CloseBraceIndex < String.Length) {
-                string VariableName = SubstrRange(String, i + 1, CloseBraceIndex);
-                get_variable_result Variable = GetVariable(Variables, VariableCount, VariableName);
-                if (Variable.Found) {
-                    memcpy(Buffer + Length, Variable.Value.Str, Variable.Value.Length);
-                    Length += Variable.Value.Length;
-                    i = CloseBraceIndex;
-                    continue;
+            u64 CloseBraceIndex = StringFindChar(Iter->String, '}', Iter->At + 1);
+            if (CloseBraceIndex < Iter->String.Length) {
+                if (Iter->At == Start) {
+                    Start = Iter->At + 1;
+                    End = CloseBraceIndex;
+                    IsVariable = true;
+                    Iter->At = CloseBraceIndex + 1;
                 }
                 else {
-                    fprintf(stdout, "Error: Undefined variable %.*s\n", StrArg(VariableName));
+                    End = Iter->At;
+                }
+            }
+            else {
+                Iter->At = Iter->String.Length;
+            }
+            break;
+        }
+    }
+
+    return {
+        .String = SubstrRange(Iter->String, Start, End),
+        .IsVariable = IsVariable,
+        .IsEntireArg = IsStart && (Iter->At == Iter->String.Length),
+    };
+}
+
+bool ProcessArg(list<string> *ArgList, string Arg, list<target *> *Input, list<target *> *Output) {
+    bool Ok = true;
+
+    // "{OUTPUT}" -> {'arg1', 'arg2', 'arg3'}
+    // "{OUTPUT}{INPUT}" -> {'arg1 arg2 arg3'}
+    // "--file={OUTPUT}" -> {'--file=arg1 arg2 arg3'}
+
+    buld_arg_iter Iter = { .String = Arg };
+
+    s_list Builder = {};
+    for (buld_arg_iter_item Item = BuldArgIterNext(&Iter); !Item.Done; Item = BuldArgIterNext(&Iter)) {
+        if (Item.IsVariable) {
+            var_parse_result ParseResult = ParseVariable(Item.String);
+            if (ParseResult.Error) {
+                Ok = false;
+                break;
+            }
+
+            string MatchVar = {};
+            list<target *> *MatchList = 0;
+            if (StringMatch(ParseResult.Variable, Strlit("INPUT"))) {
+                MatchList = Input;
+            }
+            else if (StringMatch(ParseResult.Variable, Strlit("OUTPUT"))) {
+                MatchList = Output;
+            }
+            else {
+                PushError("Error: Undefined variable '%.*s'\n", StrArg(ParseResult.Variable));
+                Ok = false;
+                break;
+            }
+
+            if (ParseResult.HasIndex) {
+                if (ParseResult.Index >= MatchList->Count) {
+                    PushError("Error: variable '%.*s' subscript exceeds list count %lu.\n", StrArg(Item.String), MatchList->Count);
+                    Ok = false;
+                    break;
+                }
+
+                string Replacement = TargetString(MatchList->Data[ParseResult.Index]);
+                if (Item.IsEntireArg) {
+                    ListAdd(ArgList, Replacement);
+                }
+                else {
+                    StringListAppend(&Builder, Replacement);
+                }
+            }
+            else {
+                for (u64 MatchListIndex = 0; MatchListIndex < MatchList->Count; MatchListIndex += 1) {
+                    string Replacement = TargetString(MatchList->Data[MatchListIndex]);
+                    if (Item.IsEntireArg) {
+                        ListAdd(ArgList, Replacement);
+                    }
+                    else {
+                        if (MatchListIndex > 0) {
+                            StringListAppend(&Builder, Strlit(" "));
+                        }
+                        StringListAppend(&Builder, Replacement);
+                    }
                 }
             }
         }
-        Buffer[Length++] = c;
+        else {
+            if (Item.IsEntireArg) {
+                ListAdd(ArgList, Item.String);
+            }
+            else {
+                StringListAppend(&Builder, Item.String);
+            }
+        }
     }
 
-    return CreateString(Buffer, Length);
+    string JoinedArg = StringListJoin(&Builder);
+    if (JoinedArg.Length > 0) {
+        ListAdd(ArgList, JoinedArg);
+    }
+
+    return Ok;
 }
 
+struct build_result {
+    bool Error;
+    bool NeedsRebuild;
+};
+
+build_result BuildTarget(target *Target) {
+    build_result BuildResult = {
+        .NeedsRebuild = Target->NeedsRebuild,
+    };
+    u64 NewestInputTimestamp = 0;
+
+    Target->VisitCount += 1;
+
+    if (Target->ParentCommand) {
+        assert(Target->Input.Count == 0);
+        BuildResult = BuildTarget(Target->ParentCommand);
+    }
+    else {
+        for (u64 TargetIndex = 0; TargetIndex < Target->Input.Count; TargetIndex += 1) {
+            target *Input = Target->Input.Data[TargetIndex];
+            build_result InputBuildResult = BuildTarget(Input);
+            BuildResult.Error |= InputBuildResult.Error;
+            BuildResult.NeedsRebuild |= InputBuildResult.NeedsRebuild;
+            NewestInputTimestamp = Max(NewestInputTimestamp, Input->FileInfo.ModTime);
+        }
+        for (u64 TargetIndex = 0; TargetIndex < Target->Depends.Count; TargetIndex += 1) {
+            target *Dep = Target->Depends.Data[TargetIndex];
+            build_result DependsBuildResult = BuildTarget(Dep);
+            BuildResult.Error |= DependsBuildResult.Error;
+            BuildResult.NeedsRebuild |= DependsBuildResult.NeedsRebuild;
+            NewestInputTimestamp = Max(NewestInputTimestamp, Dep->FileInfo.ModTime);
+        }
+    }
+
+    if (BuildResult.Error) {
+        return BuildResult;
+    }
+
+    if (Target->Program.Length) {
+        if (!BuildResult.NeedsRebuild) {
+            for (u64 TargetIndex = 0; TargetIndex < Target->Output.Count; TargetIndex += 1) {
+                target *Output = Target->Output.Data[TargetIndex];
+                assert(Output->Path.Length);
+                os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
+                assert(FileInfo.Ok); // TODO:
+                u64 NewestOutputTimestamp = 0;
+                if (FileInfo.Exists) {
+                    NewestOutputTimestamp = Max(NewestOutputTimestamp, FileInfo.ModTime);
+                }
+                Output->FileInfo = FileInfo;
+                Output->VisitCount += 1;
+
+                if (!FileInfo.Exists || NewestInputTimestamp > NewestOutputTimestamp) {
+                    assert(!Target->Path.Length);
+                    assert(Target->Output.Count);
+                    assert(Target->Program.Length);
+                    BuildResult.NeedsRebuild = true;
+                    break;
+                }
+            }
+        }
+
+        if (BuildResult.NeedsRebuild) {
+            State.CommandsToRun[State.CommandsToRunCount++] = Target;
+
+            for (u64 TargetIndex = 0; TargetIndex < Target->Output.Count; TargetIndex += 1) {
+                target *Output = Target->Output.Data[TargetIndex];
+                assert(Output->Path.Length);
+
+                // We have to also set NeedsRebuild here otherwise root level commands outputs wont be set
+                Output->NeedsRebuild = BuildResult.NeedsRebuild;
+            }
+
+        }
+    }
+    else {
+        assert(Target->Path.Length);
+        if (!Target->ParentCommand) {
+            // Leaf node
+            assert(Target->Input.Count == 0);
+
+            os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Target->Path));
+            assert(FileInfo.Ok); // TODO:
+            if (!FileInfo.Exists) {
+                PushError("File '%.*s' does not exist\n", StrArg(Target->Path));
+                BuildResult.Error = true;
+            }
+            Target->FileInfo = FileInfo;
+        }
+    }
+
+    Target->NeedsRebuild = BuildResult.NeedsRebuild;
+
+    return BuildResult;
+}
+
+s32 RunBuildCommands(bool DryRun)
+{
+    s32 ReturnCode = 0;
+
+    if (State.CommandsToRunCount == 0) {
+        printf("Nothing to rebuild.\n");
+    }
+
+    for (u64 TargetIndex = 0; TargetIndex < State.CommandsToRunCount; TargetIndex += 1) {
+        target *Target = State.CommandsToRun[TargetIndex];
+
+        list<string> SubstitutedArgList = {};
+
+        // TODO: Maybe do this in BuildTarget?
+        list<string> *ArgList = &Target->Args;
+        for (u64 ArgIndex = 0; ArgIndex < ArgList->Count; ArgIndex += 1) {
+            string Arg = ArgList->Data[ArgIndex];
+            bool Ok = ProcessArg(&SubstitutedArgList, Arg, &Target->Input, &Target->Output);
+            if (Ok) {
+                //SubstitutedArgList
+            }
+            else {
+                ReturnCode = 1;
+                break;
+            }
+        }
+
+        if (ReturnCode == 1) {
+            break;
+        }
+
+        string ArgStr = ArgsToString(&SubstitutedArgList);
+        printf("[%lu/%lu] %.*s %.*s\n", TargetIndex+1, State.CommandsToRunCount, StrArg(Target->Program), StrArg(ArgStr));
+
+        assert(Target->Program.Length);
+
+        bool Error = false;
+
+        if (DryRun) {
+            for (u64 ArgIndex = 0; ArgIndex < SubstitutedArgList.Count; ArgIndex += 1) {
+                string Arg = SubstitutedArgList.Data[ArgIndex];
+                printf("'%.*s' ", StrArg(Arg));
+            }
+            printf("\n");
+        }
+        else {
+            ReturnCode = OS_RunProcess(Target->Program, SubstitutedArgList.Data, SubstitutedArgList.Count);
+            if (ReturnCode == 0) {
+                for (u64 OutputIndex = 0; OutputIndex < Target->Output.Count; OutputIndex += 1) {
+                    target *Output = Target->Output.Data[OutputIndex];
+                    assert(Output->Path.Length);
+                    os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
+                    if (!FileInfo.Exists) {
+                        PushError("File '%.*s' does not exist after build command\n", Target->Path);
+                        ReturnCode = 1;
+                        Error = true;
+                    }
+                    Output->FileInfo = FileInfo;
+                }
+            }
+        }
+
+        if (Error) {
+            break;
+        }
+    }
+
+    return ReturnCode;
+}
