@@ -16,6 +16,7 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/wait.h> 
+#include <glob.h>
 
 //-----------------------------------------------------------------------------
 // Base layer
@@ -800,6 +801,8 @@ os_file_info OS_GetFileInfo(string Path) {
 
 struct os_directory_iterator {
     void *Handle;
+    bool Error;
+    bool Done;
 };
 
 
@@ -816,18 +819,19 @@ os_directory_iterator OS_DirectoryIterator(string DirectoryPath) {
     DIR *Dir = opendir((char *)ZDirectoryPath);
     os_directory_iterator Iter = {
         .Handle = (void *)Dir,
+        .Error = Dir == 0,
+        .Done = Dir == 0,
     };
 
     return Iter;
 }
 
-bool OS_DirectoryIteratorIsOk(os_directory_iterator Iter) {
-    return Iter.Handle != 0;
-}
-
 os_filesystem_entry OS_DirectoryIteratorNext(os_directory_iterator *Iter) {
     os_filesystem_entry FilesystemEntry = {};
-    // TODO: This isn't very good, probably want to separate error and empty directory cases more clearly.
+
+    if (Iter->Done) {
+        return FilesystemEntry;
+    }
 
     for (struct dirent *Entry = readdir((DIR *)Iter->Handle);
          Entry != 0;
@@ -848,10 +852,16 @@ os_filesystem_entry OS_DirectoryIteratorNext(os_directory_iterator *Iter) {
         }
         else {
             FilesystemEntry.Type = OS_FileType_File;
-            FilesystemEntry.Name = PushStringf("%s", CreateString(Entry->d_name));
+            FilesystemEntry.Name = PushStringf("%s", Entry->d_name);
         }
 
         break;
+    }
+
+    // TODO: Check errors
+
+    if (FilesystemEntry.Name.Length == 0) {
+        Iter->Done = true;
     }
 
     return FilesystemEntry;
@@ -860,6 +870,49 @@ os_filesystem_entry OS_DirectoryIteratorNext(os_directory_iterator *Iter) {
 void OS_DirectoryIteratorClose(os_directory_iterator *Iter) {
     closedir((DIR *)Iter->Handle);
     *Iter = {};
+}
+
+struct os_wildcard_file_iter {
+    glob_t Glob;
+    u64 At;
+    bool Done;
+    bool Error;
+};
+
+os_wildcard_file_iter OS_WildcardFileIter(string Pattern) {
+    u8 *ZPattern = (u8 *)calloc(Pattern.Length + 1, 1);
+    CopyString(ZPattern, Pattern);
+
+    glob_t Glob = {};
+    int Flags = GLOB_MARK; // add '/' to dirs
+    int Result = glob((char *)ZPattern, Flags, NULL, &Glob);
+
+    bool NoResults = Result == GLOB_NOMATCH;
+    return {
+        .Glob = Glob,
+        .Done = NoResults,
+        .Error = !NoResults && Result != 0,
+    };
+}
+
+void OS_WildcardFileIterClose(os_wildcard_file_iter *Iter) {
+    if (!Iter->Error) {
+        globfree(&Iter->Glob);
+    }
+    *Iter = {};
+}
+
+string OS_WildcardFileIterNext(os_wildcard_file_iter *Iter) {
+    string File = {};
+
+    if (Iter->At < Iter->Glob.gl_pathc) {
+        File = PushStringf("%s", Iter->Glob.gl_pathv[Iter->At++]);
+    }
+    else {
+        Iter->Done = true;
+    }
+
+    return File;
 }
 
 struct read_entire_file_result {
@@ -989,6 +1042,7 @@ string OS_GetCurrentExecutablePath() {
 
     return ExecutablePath;
 }
+
 
 //-----------------------------------------------------------------------------
 // build library

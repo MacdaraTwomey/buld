@@ -86,6 +86,8 @@ int main(int ArgCount, char **Args) {
         return ReturnCode;
     }
 
+    list<string> AA = MatchFiles(Strlit("/home/mac/projects/buld/**/*.h"));
+
     string GraphPath = {};
     bool ForceRebuild = false;
     bool DryRun = false;

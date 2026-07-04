@@ -172,9 +172,18 @@ list<target *> ParseDependencyFile(string String) {
 list<string> MatchFiles(string Pattern) {
     list<string> Files = {};
 
-    
+    os_wildcard_file_iter Iter = OS_WildcardFileIter(Pattern);
+    for (string File = OS_WildcardFileIterNext(&Iter);
+         !Iter.Done;
+         File = OS_WildcardFileIterNext(&Iter)) {
+        //printf("'%.*s'\n", StrArg(File));
+    }
 
-    os_directory_iterator Iter = OS_DirectoryIterator()
+    if (Iter.Error) {
+        fprintf(stderr, "Error globbing pattern '%.*s' %s\n", StrArg(Pattern), strerror(errno));
+    }
+
+    OS_WildcardFileIterClose(&Iter);
 
     return Files;
 }
