@@ -6,96 +6,18 @@ enum build_mode {
     BuildMode_Release,
 };
 
-s32 RebuildSelf(char **Argv, string SourcePath) {
-    s32 ReturnCode = 0;
-
-    string Filename = FilenameFromPath(SourcePath);
-    string FilenameNoExt = RemoveExtension(Filename);
-    string Dir = DirectoryFromPath(SourcePath);
-
-    string ProgramPath = OS_GetCurrentExecutablePath();
-
-    string DependencyFile = StringConcat(Dir, FilenameNoExt, Strlit(".d"));
-    read_entire_file_result ReadResult = OS_ReadEntireFile(DependencyFile);
-    if (ReadResult.Error) {
-        PushError("Warning: Failed to read %.*s.", StrArg(DependencyFile));
-    }
-
-    list<target *> Headers = ParseDependencyFile(ReadResult.String);
-
-    // TODO: Run compiler to get list of headers rather than read .d file?
-    // This does force you to run compiler every time.
-
-    target *BuldProgram = Target({
-        .Input = SourcePath,
-        .Output = { ProgramPath, DependencyFile },
-        .Args = {
-            "{INPUT}",
-            "-o", "{OUTPUT[0]}",
-            "-g",
-            "-std=c++20",
-            "-Wall", "-pedantic-errors", "-Wno-unused-variable", "-Wno-gnu-anonymous-struct", "-Wno-writable-strings",
-            "-Wno-nested-anon-types", "-Wno-gnu-zero-variadic-macro-arguments", "-Wno-missing-braces",
-            "-fno-strict-aliasing", "-Wno-unused-function", "-Wno-language-extension-token", "-Wno-deprecated-declarations",
-            "-MMD", "-MF", "{OUTPUT[1]}"},
-        .Program = Strlit("clang++"),
-        .Depends = Headers,
-    });
-
-    build_result BuildResult = BuildTarget(BuldProgram);
-    if (BuildResult.Error) {
-        ReturnCode = 1;
-        return ReturnCode;
-    }
-    else if (BuildResult.NeedsRebuild) {
-        fprintf(stdout, "Rebuilding %.*s\n\n", StrArg(SourcePath));
-
-        ReturnCode = RunBuildCommands(false);
-
-        if (ReturnCode == 0) {
-            fprintf(stdout, "\n");
-            bool Ok = OS_ReplaceCurrentProcess(ProgramPath, Argv);
-            if (!Ok) {
-                ReturnCode = 1;
-            }
-        }
-    }
-
-    State = {};
-
-    return ReturnCode;
-}
-
-//list<target *>::list<target *>(const char *String) {
-//    *this = {};
-//    ListAdd(this, CreateString((char *)String));
-//}
-//list<target *>::list<target *>(string String) {
-//    *this = {};
-//    ListAdd(this, String);
-//}
-//list<target *>::list<target *>(target *Target) {
-//    *this = {};
-//    ListAdd(this, Target);
-//}
-
 int main(int ArgCount, char **Args) {
 
-    s32 ReturnCode = RebuildSelf(Args, Strlit(__FILE__));
-    if (ReturnCode != 0) {
-        return ReturnCode;
-    }
+    RebuildSelf(Args, Str(__FILE__));
 
     string GraphPath = {};
-    bool ForceRebuild = false;
-    bool DryRun = false;
     build_mode BuildMode = BuildMode_Debug;
 
     list<string> BuildTargetList = {};
 
     for (s32 ArgIndex = 1; ArgIndex < ArgCount; ArgIndex += 1) {
         string Arg = CreateString(Args[ArgIndex]);
-        if (StringMatch(Arg, Strlit("--graph"))) {
+        if (StringMatch(Arg, Str("--graph"))) {
             ArgIndex += 1;
             if (ArgIndex < ArgCount) {
                 GraphPath = CreateString(Args[ArgIndex]);
@@ -105,20 +27,20 @@ int main(int ArgCount, char **Args) {
                 return 1;
             }
         }
-        else if (StringMatch(Arg, Strlit("--force"))) {
-            ForceRebuild = true;
+        else if (StringMatch(Arg, Str("--force-rebuild"))) {
+            State.ForceRebuild = true;
         }
-        else if (StringMatch(Arg, Strlit("--release"))) {
+        else if (StringMatch(Arg, Str("--release"))) {
             BuildMode = BuildMode_Release;
         }
-        else if (StringMatch(Arg, Strlit("--debug"))) {
+        else if (StringMatch(Arg, Str("--debug"))) {
             BuildMode = BuildMode_Debug;
         }
-        else if (StringMatch(Arg, Strlit("--dry-run"))) {
-            DryRun = true;
+        else if (StringMatch(Arg, Str("--dry-run"))) {
+            State.DryRun = true;
         }
         else {
-            if (StringMatch(StringPrefix(Arg, 2), Strlit("--"))) {
+            if (StringMatch(StringPrefix(Arg, 2), Str("--"))) {
                 fprintf(stderr, "Error: invalid optional argument '%.*s'.\n", StrArg(Arg));
                 return 1;
             }
@@ -140,15 +62,12 @@ int main(int ArgCount, char **Args) {
     // * Embedding
     // * Hash output files so they are only used in later commands if they actually changed?
     // * Allow passing targets into args to opt out of using variables (adds them as inputs maybe)
-    // * Maybe targets Output should be a list of strings internally. This would make walking from leaf to root not possible though.
-    // * Find a way to allow concatening lists by puttin a list in a list
 
     // If might be a nicer data structure to have files as inputs and outputs of other files, and some files
     // just have a pointer to the command to run to generate them (maybe the command points to the inputs and outputs also? probably not necessary)
     // shouldn't affect user api though
 
-    State.ProjectRoot = DirectoryFromPath(Strlit(__FILE__));
-    State.ForceRebuild = ForceRebuild;
+    State.ProjectRoot = DirectoryFromPath(Str(__FILE__));
 
     list<string> CompileFlags = {};
     if (BuildMode == BuildMode_Debug) {
@@ -160,9 +79,9 @@ int main(int ArgCount, char **Args) {
     }
 
     target *Exe = CppExecutable({
-        .Path = Strlit("sample/build/main.exe"),
+        .Path = Str("sample/build/main.exe"),
         .Sources = {
-            MatchFiles(Strlit("sample/*.cpp"))
+            MatchFiles(Str("sample/*.cpp"))
             //"sample/file1.cpp"
             //"sample/main.cpp",
         },
@@ -171,20 +90,20 @@ int main(int ArgCount, char **Args) {
     });
 
     Target({
-        .Name = Strlit("copy"),
+        .Name = Str("copy"),
         .Input = {
             Exe,
-            Mkdir(Strlit("sample/stage"))
+            Mkdir(Str("sample/stage"))
         },
         .Args = {"{INPUT[0]}", "{INPUT[1]}/."},
-        .Program = Strlit("cp"),
+        .Program = Str("cp"),
     });
 
     if (BuildTargetList.Count == 0) {
-        ArrayAdd(&BuildTargetList, Exe->Output.Data[0]->Path);
+        ListAdd(&BuildTargetList, Exe->Output.Data[0]->Path);
     }
 
-    ReturnCode = BuildTargetByName(&BuildTargetList);
+    s32 ReturnCode = BuildTargetByName(&BuildTargetList);
 
     if (GraphPath.Length) {
         // TODO: No fopen and real string handling
@@ -205,7 +124,7 @@ int main(int ArgCount, char **Args) {
     }
 
     if (ReturnCode == 0) {
-        ReturnCode = RunBuildCommands(DryRun);
+        ReturnCode = RunBuildCommands();
     }
 
     for (u64 ErrorIndex = 0; ErrorIndex < State.ErrorCount; ErrorIndex += 1) {

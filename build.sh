@@ -16,14 +16,14 @@ if [[ $ArgCount == 2 ]]; then OutputPathType=$2; fi
 # ------------ Flags and sources -------------------------------------------------
 Source="$Root/buld.cpp"
 Include="-I $Root/src"
-CommonFlags="-DBASE_DEBUG=1"
+CommonFlags=""
 Executable=`basename $Root`
 
-ClangFlags="-g -std=c++20"
+ClangFlags="-g -std=c++20 -fno-strict-aliasing"
 #ClangFlags+=" -fsanitize=address"
-ClangFlags+=" -Wall -pedantic-errors -Wno-unused-variable -Wno-gnu-anonymous-struct -Wno-writable-strings"
-ClangFlags+=" -Wno-nested-anon-types -Wno-gnu-zero-variadic-macro-arguments -Wno-missing-braces"
-ClangFlags+=" -fno-strict-aliasing -Wno-unused-function -Wno-language-extension-token -Wno-deprecated-declarations"
+#ClangFlags+=" -Wall -pedantic-errors -Wno-unused-variable -Wno-gnu-anonymous-struct -Wno-writable-strings"
+#ClangFlags+=" -Wno-nested-anon-types -Wno-gnu-zero-variadic-macro-arguments -Wno-missing-braces"
+#ClangFlags+="  -Wno-unused-function -Wno-language-extension-token -Wno-deprecated-declarations"
 #ClangFlags+=" -fdiagnostics-color"    # forces colour even when piping to sed
 
 ClFlags="-std:c++latest /Zc:preprocessor -Zc:strictStrings- -D_CRT_SECURE_NO_WARNINGS -W3 -wd5105 -wd4201 -wd4505 -INCREMENTAL:NO -FC -EHs- -nologo -Zi"

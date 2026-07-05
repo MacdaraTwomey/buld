@@ -75,106 +75,10 @@ void EndGraph(FILE *File) {
     fprintf(File, "}\n");
 }
 
-string UnEscapeMakeDependencyPath(string String) {
-    string Unescaped = {};
-
-    // Things clang does
-    // '\' -> '/' I think it does this for windows backslash reasons, but it is ambiguous, therefore ignore this issue
-    // '$'  -> '$$'
-    // '#'  -> '\#'
-    // ' '  -> '\ '
-    // Doesn't escape newlines, other whitespace, colons or other special characters.
-
-    if ((StringFindChar(String, '\\') < String.Length) ||
-        (StringFindChar(String, '$') < String.Length)) {
-        Unescaped = String;
-    }
-    else {
-        u64 Length = 0;
-        u8 *Buffer = PushArray(String.Length, u8);
-        for (u64 i = 0; i < String.Length; i += 1) {
-            u8 c = String.Str[i];
-            if (c == '\\') {
-                u8 NextC = StringGetChar(String, i+1);
-                if (NextC == ' ' || NextC == '#') {
-                    i += 1;
-                    Buffer[Length++] = NextC;
-                }
-                else {
-                    Buffer[Length++] = c;
-                }
-            }
-            else if (c == '$' && StringGetChar(String, i+1) == '$') {
-                i += 1;
-                Buffer[Length++] = c;
-            }
-            else {
-                Buffer[Length++] = c;
-            }
-        }
-        Unescaped = CreateString(Buffer, Length);
-    }
-
-    return Unescaped;
-}
-
-list<target *> ParseDependencyFile(string String) {
-
-    list<target *> List = {};
-
-    // TODO: should we ensure the target of these matches what we expect
-
-    // You can always search for ': ' to know end of target, because spaces will be escaped
-    // Spaces can be used to separate dependencies also
-    cut_result Parts = StringCut(String, Strlit(": "));
-    if (Parts.Found) {
-        string Target = Parts.Before;
-        string Deps = Parts.After;
-        if (StringGetChar(Deps, Deps.Length-1) == '\n') {
-            Deps.Length -= 1;
-        }
-
-        u64 DepStart = 0;
-        for (u64 i = 0; i < Deps.Length;) {
-            u64 SpaceIndex = StringFindChar(Deps, (u8)' ', i);
-            if (((SpaceIndex < Deps.Length) && (StringGetChar(Deps, SpaceIndex-1) != '\\')) || (SpaceIndex == Deps.Length)) {
-                string Path = SubstrRange(Deps, DepStart, SpaceIndex);
-                string UnescapedPath = UnEscapeMakeDependencyPath(Path);
-                //printf("DEP: %.*s: %.*s\n", StrArg(Target), StrArg(UnescapedPath));
-
-                ListAdd(&List, UnescapedPath);
-
-                u64 At = SpaceIndex + 1;
-                while (true) {
-                    u8 c = StringGetChar(Deps, At);
-                    if (c == ' ') {
-                        At += 1;
-                    }
-                    else if (c == '\\' && StringGetChar(Deps, At+1) == '\n') {
-                        At += 2;
-                    }
-                    else {
-                        break;
-                    }
-                }
-                DepStart = At;
-                i = At;
-            }
-            else {
-                i += 1;
-            }
-        }
-    }
-
-    return List;
-}
-
 list<string> MatchFiles(string Pattern) {
     list<string> Files = {};
 
-    if (Pattern.Length > 0 && Pattern.Str[0] != '/') {
-        Pattern = StringConcat(State.ProjectRoot, Pattern);
-    }
+    Pattern = ProjectPath(Pattern);
 
     os_wildcard_file_iter Iter = OS_WildcardFileIter(Pattern);
     for (string File = OS_WildcardFileIterNext(&Iter);
@@ -221,10 +125,10 @@ target *CppExecutable(executable_args ExecutableArgs) {
         target *Source = ExecutableArgs.Sources.Data[SourceIndex];
         string FileNamePart = RemoveExtension(FilenameFromPath(Source->Path));
 
-        string DependencyFile = StringConcat(Dir, FileNamePart, Strlit(".d"));
-        string ObjectFilePath = StringConcat(Dir, FileNamePart, Strlit(".o"));
+        string DependencyFile = StringConcat(Dir, FileNamePart, Str(".d"));
+        string ObjectFilePath = StringConcat(Dir, FileNamePart, Str(".o"));
 
-        read_entire_file_result ReadResult = OS_ReadEntireFile(DependencyFile);
+        os_read_entire_file_result ReadResult = OS_ReadEntireFile(DependencyFile);
         if (ReadResult.Error) {
             PushError("Error: Failed to read %.*s.", StrArg(DependencyFile));
         }
@@ -240,7 +144,7 @@ target *CppExecutable(executable_args ExecutableArgs) {
                 "-o", "{OUTPUT[0]}",
                 "-MMD", "-MF", "{OUTPUT[1]}"
             },
-            .Program = Strlit("clang++"),
+            .Program = Str("clang++"),
             .Depends = {Headers, BuildDir},
         });
 
@@ -255,7 +159,7 @@ target *CppExecutable(executable_args ExecutableArgs) {
             "-o", "{OUTPUT}",
             "{INPUT}"
         },
-        .Program = Strlit("clang++"),
+        .Program = Str("clang++"),
         .Depends = BuildDir,
     });
 
