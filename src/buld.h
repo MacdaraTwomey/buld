@@ -755,6 +755,12 @@ constexpr T&& forward(remove_reference_t<T>&& t) noexcept {
     return static_cast<T&&>(t);
 }
 
+template<class T, class U>
+struct is_same : false_type {};
+
+template<class T>
+struct is_same<T, T> : true_type {};
+
 //-----------------------------------------------------------------------------
 // OS
 //
@@ -1106,6 +1112,12 @@ struct target;
 template<typename t>
 struct list;
 
+template <typename T>
+struct is_list : false_type {};
+
+template <typename T>
+struct is_list<list<T>> : true_type {};
+
 template<typename t>
 void ListAdd(list<t> *List, t Value);
 
@@ -1137,28 +1149,39 @@ struct list {
 
     template<typename... args>
     list(args&&... Args) : Data(0), Count(0), Capacity(0) {
-        (ListAdd(this, forward<args>(Args)), ...);
+
+        //(ListAdd(this, forward<args>(Args)), ...);
+
+        auto ProcessItem = [&]<typename T>(T&& Item) {
+            if constexpr (is_list<remove_reference_t<T>>::value) {
+                for (u64 i = 0; i < Item.Count; i += 1) {
+                    ListAdd(this, Item.Data[i]);
+                }
+            }
+            else {
+                ListAdd(this, Item);
+            }
+        };
+
+        (ProcessItem(forward<args>(Args)), ...);
     }
 
-    list operator+(const list& Right) {
+    template<typename T>
+    list operator+(const T& Right) {
         list List = {};
 
         for (u64 i = 0; i < this->Count; i += 1) {
             ListAdd(&List, this->Data[i]);
         }
-        for (u64 i = 0; i < Right.Count; i += 1) {
-            ListAdd(&List, Right.Data[i]);
-        }
+        ListAdd(&List, Right);
 
         return List;
     }
 
-    list &operator+=(const list& Right) {
-        for (u64 i = 0; i < Right.Count; i += 1) {
-            ListAdd(this, Right.Data[i]);
-        }
-
-        return this;
+    template<typename T>
+    list &operator+=(const T& Right) {
+        ListAdd(this, Right);
+        return *this;
     }
 };
 
@@ -1324,6 +1347,7 @@ void ListAdd(list<string> *List, const char *String) {
     ListAdd(List, CreateString((char *)String));
 }
 
+
 // This causes infinte recursive of ListAdd parameter pack function
 //void ListAdd(list<string> *List, list<string> StringList) {
 //    for (u64 i = 0; i < StringList.Count; i += 1) {
@@ -1357,7 +1381,12 @@ string ArgsToString(list<string> *List) {
 }
 
 string ProjectPath(string Path) {
-    return StringConcat(State.ProjectRoot, Path);
+    string Result = Path;
+    if (Path.Length > 0 && Path.Str[0] != '/') {
+        Result = StringConcat(State.ProjectRoot, Path);
+    }
+
+    return Result;
 }
 
 struct var_parse_result {
@@ -1626,6 +1655,28 @@ build_result BuildTarget(target *Target) {
 
     return BuildResult;
 }
+
+s32 BuildTargetByName(list<string> *TargetNames) {
+    s32 ReturnCode = 0;
+    for (u64 TargetIndex = 0; TargetIndex < TargetNames->Count; TargetIndex += 1) {
+        string TargetName = TargetNames->Data[TargetIndex];
+        target *Target = FindTarget(TargetName);
+        if (Target == &NullTarget) {
+            fprintf(stderr, "Error: unknown target '%.*s'.\n", StrArg(TargetName));
+            ReturnCode = 1;
+            break;
+        }
+
+        build_result BuildResult = BuildTarget(Target);
+        if (BuildResult.Error) {
+            ReturnCode = 1;
+            break;
+        }
+    }
+
+    return ReturnCode;
+}
+
 
 s32 RunBuildCommands(bool DryRun)
 {

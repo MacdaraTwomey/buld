@@ -91,7 +91,7 @@ int main(int ArgCount, char **Args) {
     bool DryRun = false;
     build_mode BuildMode = BuildMode_Debug;
 
-    list<string> BuildTargets = {};
+    list<string> BuildTargetList = {};
 
     for (s32 ArgIndex = 1; ArgIndex < ArgCount; ArgIndex += 1) {
         string Arg = CreateString(Args[ArgIndex]);
@@ -123,7 +123,7 @@ int main(int ArgCount, char **Args) {
                 return 1;
             }
             else {
-                ListAdd(&BuildTargets, Arg);
+                ListAdd(&BuildTargetList, Arg);
             }
         }
     }
@@ -152,20 +152,19 @@ int main(int ArgCount, char **Args) {
 
     list<string> CompileFlags = {};
     if (BuildMode == BuildMode_Debug) {
-        ListAdd(&CompileFlags, "-g");
-        ListAdd(&CompileFlags, "-O0");
+        CompileFlags += "-g";
+        CompileFlags += "-O0";
     }
     else if (BuildMode == BuildMode_Release) {
-        ListAdd(&CompileFlags, "-O3");
+        CompileFlags += "-O3";
     }
-
-    list<string> AA = MatchFiles(Strlit("/home/mac/projects/buld/**/*.h"));
 
     target *Exe = CppExecutable({
         .Path = Strlit("sample/build/main.exe"),
         .Sources = {
-            "sample/main.cpp",
-            "sample/file1.cpp"
+            MatchFiles(Strlit("sample/*.cpp"))
+            //"sample/file1.cpp"
+            //"sample/main.cpp",
         },
         .CompileFlags = CompileFlags,
         .LinkFlags = {},
@@ -181,24 +180,11 @@ int main(int ArgCount, char **Args) {
         .Program = Strlit("cp"),
     });
 
-    if (BuildTargets.Count == 0) {
-        ArrayAdd(&BuildTargets, Exe->Output.Data[0]->Path);
+    if (BuildTargetList.Count == 0) {
+        ArrayAdd(&BuildTargetList, Exe->Output.Data[0]->Path);
     }
 
-    for (u64 TargetIndex = 0; TargetIndex < BuildTargets.Count; TargetIndex += 1) {
-        string TargetName = BuildTargets.Data[TargetIndex];
-        target *Target = FindTarget(TargetName);
-        if (Target == &NullTarget) {
-            fprintf(stderr, "Error: unknown target '%.*s'.\n", StrArg(TargetName));
-            return 1;
-        }
-
-        build_result BuildResult = BuildTarget(Target);
-        if (BuildResult.Error) {
-            ReturnCode = 1;
-            break;
-        }
-    }
+    ReturnCode = BuildTargetByName(&BuildTargetList);
 
     if (GraphPath.Length) {
         // TODO: No fopen and real string handling
@@ -223,7 +209,7 @@ int main(int ArgCount, char **Args) {
     }
 
     for (u64 ErrorIndex = 0; ErrorIndex < State.ErrorCount; ErrorIndex += 1) {
-        printf("%.*s\n", StrArg(State.Errors[ErrorIndex]));
+        fprintf(stderr, "%.*s\n", StrArg(State.Errors[ErrorIndex]));
         ReturnCode = 1;
     }
 

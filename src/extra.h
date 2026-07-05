@@ -172,11 +172,15 @@ list<target *> ParseDependencyFile(string String) {
 list<string> MatchFiles(string Pattern) {
     list<string> Files = {};
 
+    if (Pattern.Length > 0 && Pattern.Str[0] != '/') {
+        Pattern = StringConcat(State.ProjectRoot, Pattern);
+    }
+
     os_wildcard_file_iter Iter = OS_WildcardFileIter(Pattern);
     for (string File = OS_WildcardFileIterNext(&Iter);
          !Iter.Done;
          File = OS_WildcardFileIterNext(&Iter)) {
-        //printf("'%.*s'\n", StrArg(File));
+        ListAdd(&Files, File);
     }
 
     if (Iter.Error) {
@@ -230,7 +234,8 @@ target *CppExecutable(executable_args ExecutableArgs) {
         target *Object = Target({
             .Input = Source,
             .Output = {ObjectFilePath, DependencyFile},
-            .Args = ExecutableArgs.CompileFlags + list<string>{
+            .Args = {
+                ExecutableArgs.CompileFlags,
                 "-c", "{INPUT}",
                 "-o", "{OUTPUT[0]}",
                 "-MMD", "-MF", "{OUTPUT[1]}"
@@ -245,7 +250,8 @@ target *CppExecutable(executable_args ExecutableArgs) {
     target *Exe = Target({
         .Input = ObjectFiles,
         .Output = ExecutableArgs.Path,
-        .Args = ExecutableArgs.LinkFlags + list<string>{
+        .Args = {
+            ExecutableArgs.LinkFlags,
             "-o", "{OUTPUT}",
             "{INPUT}"
         },
