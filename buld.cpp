@@ -86,8 +86,6 @@ int main(int ArgCount, char **Args) {
         return ReturnCode;
     }
 
-    list<string> AA = MatchFiles(Strlit("/home/mac/projects/buld/**/*.h"));
-
     string GraphPath = {};
     bool ForceRebuild = false;
     bool DryRun = false;
@@ -142,84 +140,49 @@ int main(int ArgCount, char **Args) {
     // * Embedding
     // * Hash output files so they are only used in later commands if they actually changed?
     // * Allow passing targets into args to opt out of using variables (adds them as inputs maybe)
+    // * Maybe targets Output should be a list of strings internally. This would make walking from leaf to root not possible though.
+    // * Find a way to allow concatening lists by puttin a list in a list
 
     // If might be a nicer data structure to have files as inputs and outputs of other files, and some files
     // just have a pointer to the command to run to generate them (maybe the command points to the inputs and outputs also? probably not necessary)
     // shouldn't affect user api though
 
-
-    State.ProjectRoot = Strlit("/home/mac/projects/buld/");
-    //State.ProjectRoot = DirectoryFromPath(Strlit(__FILE__));
+    State.ProjectRoot = DirectoryFromPath(Strlit(__FILE__));
     State.ForceRebuild = ForceRebuild;
 
+    list<string> CompileFlags = {};
     if (BuildMode == BuildMode_Debug) {
-        //PushFlags("-g", Strlit("-O0"));
+        ListAdd(&CompileFlags, "-g");
+        ListAdd(&CompileFlags, "-O0");
     }
     else if (BuildMode == BuildMode_Release) {
-        //PushFlags("-O3");
+        ListAdd(&CompileFlags, "-O3");
     }
 
+    list<string> AA = MatchFiles(Strlit("/home/mac/projects/buld/**/*.h"));
 
-    //target *GenSrc = Target({
-    //    .Input = "sample/gen-src.txt",
-    //    .Output = List("sample/build/gen-src.cpp", "sample/build/gen-src.h"),
-    //    .Args = "--do-gen",
-    //    .Program = "gener",
-    //});
-    //target *GenObj = Target({
-    //    .Input = GenSrc, // GenSrc->Output.Data[0],
-    //    .Output = "sample/build/gen-src.o",
-    //    .Args = "-c {INPUT} -o {OUTPUT} -g",
-    //    .Program = "compiler",
-    //});
-
-
-    string DependencyFile = Strlit("sample/build/main.d");
-    read_entire_file_result ReadResult = OS_ReadEntireFile(DependencyFile);
-    if (ReadResult.Error) {
-        PushError("Error: Failed to read %.*s.", StrArg(DependencyFile));
-        return 1;
-    }
-
-    list<target *> Headers = ParseDependencyFile(ReadResult.String);
-
-    target *Main = Target({
-        .Input = "sample/main.cpp",
-        .Output = {"sample/build/main.o", "sample/build/main.d"},
-        .Args = {"-c", "{INPUT}", "-o", "{OUTPUT[0]}", "-g", "-MMD", "-MF", "{OUTPUT[1]}"},
-        .Program = Strlit("clang++"),
-        .Depends = Headers,
-    });
-
-    target *File1 = Target({
-        .Input = "sample/file1.cpp",
-        .Output = "sample/build/file1.o",
-        .Args = {"-c", "{INPUT}", "-o", "{OUTPUT}", "-g", "-MMD"},
-        .Program = Strlit("clang++"),
-    });
-
-    target *Exe = Target({
-        .Input = { Main->Output.Data[0], File1 },
-        .Output = "sample/build/main.exe",
-        .Args = {"-o", "{OUTPUT}", "{INPUT}"},
-        .Program = Strlit("clang++"),
-    });
-
-    target *StageDir = Target({
-        .Output = "sample/stage",
-        .Args = {"-p", "{OUTPUT}"},
-        .Program = Strlit("mkdir"),
+    target *Exe = CppExecutable({
+        .Path = Strlit("sample/build/main.exe"),
+        .Sources = {
+            "sample/main.cpp",
+            "sample/file1.cpp"
+        },
+        .CompileFlags = CompileFlags,
+        .LinkFlags = {},
     });
 
     Target({
         .Name = Strlit("copy"),
-        .Input = { Exe, StageDir },
+        .Input = {
+            Exe,
+            Mkdir(Strlit("sample/stage"))
+        },
         .Args = {"{INPUT[0]}", "{INPUT[1]}/."},
         .Program = Strlit("cp"),
     });
 
     if (BuildTargets.Count == 0) {
-        ArrayAdd(&BuildTargets, Strlit("sample/build/main.exe"));
+        ArrayAdd(&BuildTargets, Exe->Output.Data[0]->Path);
     }
 
     for (u64 TargetIndex = 0; TargetIndex < BuildTargets.Count; TargetIndex += 1) {

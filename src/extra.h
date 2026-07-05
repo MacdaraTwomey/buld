@@ -187,3 +187,72 @@ list<string> MatchFiles(string Pattern) {
 
     return Files;
 }
+
+// TODO: Make recursive dirs
+target *Mkdir(string Path) {
+    return Target({
+        .Output = Path,
+        .CommandProc = [](target *Target) -> s32 {
+            return OS_CreateDirectory(Target->Output.Data[0]->Name, OS_FileMode_DefaultDir, OS_CreateDirectoryFlags_AllowExists) ? 0 : 1;
+        },
+    });
+}
+
+struct executable_args {
+    string Path;
+    list<target *> Sources;
+    list<string> CompileFlags;
+    list<string> LinkFlags;
+};
+
+target *CppExecutable(executable_args ExecutableArgs) {
+
+    string Dir = DirectoryFromPath(ExecutableArgs.Path);
+
+    target *BuildDir = Mkdir(Dir);
+
+    list<target *> ObjectFiles = {};
+
+    for (u64 SourceIndex = 0; SourceIndex < ExecutableArgs.Sources.Count; SourceIndex += 1) {
+        target *Source = ExecutableArgs.Sources.Data[SourceIndex];
+        string FileNamePart = RemoveExtension(FilenameFromPath(Source->Path));
+
+        string DependencyFile = StringConcat(Dir, FileNamePart, Strlit(".d"));
+        string ObjectFilePath = StringConcat(Dir, FileNamePart, Strlit(".o"));
+
+        read_entire_file_result ReadResult = OS_ReadEntireFile(DependencyFile);
+        if (ReadResult.Error) {
+            PushError("Error: Failed to read %.*s.", StrArg(DependencyFile));
+        }
+
+        list<target *> Headers = ParseDependencyFile(ReadResult.String);
+
+        target *Object = Target({
+            .Input = Source,
+            .Output = {ObjectFilePath, DependencyFile},
+            .Args = ExecutableArgs.CompileFlags + list<string>{
+                "-c", "{INPUT}",
+                "-o", "{OUTPUT[0]}",
+                "-MMD", "-MF", "{OUTPUT[1]}"
+            },
+            .Program = Strlit("clang++"),
+            .Depends = {Headers, BuildDir},
+        });
+
+        ListAdd(&ObjectFiles, Object->Output.Data[0]);
+    }
+
+    target *Exe = Target({
+        .Input = ObjectFiles,
+        .Output = ExecutableArgs.Path,
+        .Args = ExecutableArgs.LinkFlags + list<string>{
+            "-o", "{OUTPUT}",
+            "{INPUT}"
+        },
+        .Program = Strlit("clang++"),
+        .Depends = BuildDir,
+    });
+
+    return Exe;
+}
+

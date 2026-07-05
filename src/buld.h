@@ -961,6 +961,61 @@ read_entire_file_result OS_ReadEntireFile(string Path) {
     return Result;
 }
 
+enum os_file_mode {
+    OS_FileMode_None   = 0,
+
+    //                   Octal values
+    OS_FileMode_UserR  = 0400,
+    OS_FileMode_UserW  = 0200,
+    OS_FileMode_UserX  = 0100,
+    OS_FileMode_GroupR = 0040,
+    OS_FileMode_GroupW = 0020,
+    OS_FileMode_GroupX = 0010,
+    OS_FileMode_OtherR = 0004,
+    OS_FileMode_OtherW = 0002,
+    OS_FileMode_OtherX = 0001,
+
+    OS_FileMode_UserRW   = OS_FileMode_UserR|OS_FileMode_UserW,
+    OS_FileMode_UserRX   = OS_FileMode_UserR|OS_FileMode_UserX,
+    OS_FileMode_UserRWX  = OS_FileMode_UserR|OS_FileMode_UserW|OS_FileMode_UserX,
+
+    OS_FileMode_GroupRW  = OS_FileMode_GroupR|OS_FileMode_GroupW,
+    OS_FileMode_GroupRX  = OS_FileMode_GroupR|OS_FileMode_GroupX,
+    OS_FileMode_GroupRWX = OS_FileMode_GroupR|OS_FileMode_GroupW|OS_FileMode_GroupX,
+
+    OS_FileMode_OtherRW  = OS_FileMode_OtherR|OS_FileMode_OtherW,
+    OS_FileMode_OtherRX  = OS_FileMode_OtherR|OS_FileMode_OtherX,
+    OS_FileMode_OtherRWX = OS_FileMode_OtherR|OS_FileMode_OtherW|OS_FileMode_OtherX,
+
+    OS_FileMode_DefaultDir  = OS_FileMode_UserRWX|OS_FileMode_GroupRX|OS_FileMode_OtherRX,
+    OS_FileMode_DefaultFile = OS_FileMode_UserRWX|OS_FileMode_GroupR|OS_FileMode_OtherR,
+    OS_FileMode_DefaultExe  = OS_FileMode_UserRWX|OS_FileMode_GroupRX|OS_FileMode_OtherRX,
+};
+
+enum os_create_directory_flags {
+    OS_CreateDirectoryFlags_None = 0,
+    OS_CreateDirectoryFlags_AllowExists = 1,
+};
+
+bool OS_CreateDirectory(string Path, os_file_mode Mode, os_create_directory_flags Flags) {
+    bool Ok = true;
+
+    u8 *ZPath = (u8 *)calloc(Path.Length + 1, 1);
+    CopyString(ZPath, Path);
+
+    int Result = mkdir((char *)ZPath, (mode_t)Mode);
+    if (Result != 0) {
+        if (errno == EEXIST && Flags == OS_CreateDirectoryFlags_AllowExists) {
+        }
+        else {
+            fprintf(stderr, "Failed to create directory '%.*s'. %s", StrArg(Path), strerror(errno));
+            Ok = false;
+        }
+    }
+
+    return Ok;
+}
+
 bool OS_ReplaceCurrentProcess(string ProgramPath, char **Argv) {
     u8 *ZProgramPath = (u8 *)calloc(ProgramPath.Length + 1, 1);
     CopyString(ZProgramPath, ProgramPath);
@@ -1027,17 +1082,15 @@ s32 OS_RunProcess(string Program, string *Args, s32 ArgCount) {
 string OS_GetCurrentExecutablePath() {
     string ExecutablePath = {};
 
-    pid_t PID = getpid();
+    char *SymlinkToProgram = "/proc/self/exe";
 
-    char ZPath[4096];
-    snprintf(ZPath, sizeof(ZPath), "/proc/%d/exe", PID);
     // Allocates buffer that must be freed for you
-    char *ResolvedPath = realpath(ZPath, 0);
+    char *ResolvedPath = realpath(SymlinkToProgram, 0);
     if (ResolvedPath) {
         ExecutablePath = CreateString(ResolvedPath);
     }
     else {
-        fprintf(stdout, "Unable to resolve %s symlink. %s\n", ZPath, strerror(errno));
+        fprintf(stdout, "Unable to resolve %s symlink. %s\n", SymlinkToProgram, strerror(errno));
     }
 
     return ExecutablePath;
@@ -1086,7 +1139,30 @@ struct list {
     list(args&&... Args) : Data(0), Count(0), Capacity(0) {
         (ListAdd(this, forward<args>(Args)), ...);
     }
+
+    list operator+(const list& Right) {
+        list List = {};
+
+        for (u64 i = 0; i < this->Count; i += 1) {
+            ListAdd(&List, this->Data[i]);
+        }
+        for (u64 i = 0; i < Right.Count; i += 1) {
+            ListAdd(&List, Right.Data[i]);
+        }
+
+        return List;
+    }
+
+    list &operator+=(const list& Right) {
+        for (u64 i = 0; i < Right.Count; i += 1) {
+            ListAdd(this, Right.Data[i]);
+        }
+
+        return this;
+    }
 };
+
+typedef s32 (*command_proc)(target *Target);
 
 struct target {
     string Name;
@@ -1098,6 +1174,9 @@ struct target {
     list<target *> Output;
     list<string> Args;
     string Program;
+    // Run after Program if Program is set
+    command_proc CommandProc;
+
     list<target *> Depends;
 
     bool NeedsRebuild;
@@ -1119,6 +1198,7 @@ struct target_args {
     list<target *> Output;
     list<string> Args;
     string_arg Program;
+    command_proc CommandProc;
     list<target *> Depends;
 };
 
@@ -1136,6 +1216,11 @@ struct state {
 state State = {};
 target NullTarget = {};
 
+
+bool IsCommandTarget(target *Target) {
+    return Target->Program.Length || Target->CommandProc;
+}
+
 target *Target(target Value = {}) {
     target *Result = &State.Targets[State.TargetCount++];
     *Result = Value;
@@ -1148,9 +1233,10 @@ target *Target(target Value = {}) {
         Result->NeedsRebuild = true;
     }
 
+
     for (u64 i = 0; i < Result->Output.Count; i += 1) {
+        assert(IsCommandTarget(Result));
         //TODO: Dedupe with things in depends or things already in input? Or rely on caller to do this.
-        assert(Result->Program.Length);
         target *Output = Result->Output.Data[i];
         assert(!Output->ParentCommand);
         Output->ParentCommand = Result;
@@ -1237,6 +1323,8 @@ void ListAdd(list<target *> *List, list<target *> &Other) {
 void ListAdd(list<string> *List, const char *String) {
     ListAdd(List, CreateString((char *)String));
 }
+
+// This causes infinte recursive of ListAdd parameter pack function
 //void ListAdd(list<string> *List, list<string> StringList) {
 //    for (u64 i = 0; i < StringList.Count; i += 1) {
 //        ListAdd(List, StringList.Data[i]);
@@ -1484,7 +1572,7 @@ build_result BuildTarget(target *Target) {
         return BuildResult;
     }
 
-    if (Target->Program.Length) {
+    if (IsCommandTarget(Target)) {
         if (!BuildResult.NeedsRebuild) {
             for (u64 TargetIndex = 0; TargetIndex < Target->Output.Count; TargetIndex += 1) {
                 target *Output = Target->Output.Data[TargetIndex];
@@ -1500,8 +1588,6 @@ build_result BuildTarget(target *Target) {
 
                 if (!FileInfo.Exists || NewestInputTimestamp > NewestOutputTimestamp) {
                     assert(!Target->Path.Length);
-                    assert(Target->Output.Count);
-                    assert(Target->Program.Length);
                     BuildResult.NeedsRebuild = true;
                     break;
                 }
@@ -1515,10 +1601,9 @@ build_result BuildTarget(target *Target) {
                 target *Output = Target->Output.Data[TargetIndex];
                 assert(Output->Path.Length);
 
-                // We have to also set NeedsRebuild here otherwise root level commands outputs wont be set
+                // We have to also set NeedsRebuild here otherwise root level commands outputs wont be set (do we care?)
                 Output->NeedsRebuild = BuildResult.NeedsRebuild;
             }
-
         }
     }
     else {
@@ -1573,38 +1658,59 @@ s32 RunBuildCommands(bool DryRun)
             break;
         }
 
+        // TODO: What to print if we only have a CommandProc?
+
         string ArgStr = ArgsToString(&SubstitutedArgList);
-        printf("[%lu/%lu] %.*s %.*s\n", TargetIndex+1, State.CommandsToRunCount, StrArg(Target->Program), StrArg(ArgStr));
-
-        assert(Target->Program.Length);
-
-        bool Error = false;
-
-        if (DryRun) {
-            for (u64 ArgIndex = 0; ArgIndex < SubstitutedArgList.Count; ArgIndex += 1) {
-                string Arg = SubstitutedArgList.Data[ArgIndex];
-                printf("'%.*s' ", StrArg(Arg));
+        // Only print either the Program or the CommandProc
+        if (Target->Program.Length) {
+            printf("[%lu/%lu] %.*s %.*s\n", TargetIndex+1, State.CommandsToRunCount, StrArg(Target->Program), StrArg(ArgStr));
+        }
+        else if (Target->CommandProc) {
+            printf("[%lu/%lu] CommandProc", TargetIndex+1, State.CommandsToRunCount);
+            if (Target->Input.Count) {
+                string InputStr = TargetListString(&Target->Input);
+                printf(" Input='%.*s'", StrArg(InputStr));
+            }
+            if (Target->Output.Count) {
+                string OutputStr = TargetListString(&Target->Output);
+                printf(" Output='%.*s'", StrArg(OutputStr));
+            }
+            if (Target->Args.Count) {
+                printf(" Args='%.*s'", StrArg(ArgStr));
             }
             printf("\n");
         }
-        else {
+
+        if (DryRun) {
+            //for (u64 ArgIndex = 0; ArgIndex < SubstitutedArgList.Count; ArgIndex += 1) {
+            //    string Arg = SubstitutedArgList.Data[ArgIndex];
+            //    printf("'%.*s' ", StrArg(Arg));
+            //}
+            //printf("\n");
+            continue;
+        }
+
+        if (Target->Program.Length) {
             ReturnCode = OS_RunProcess(Target->Program, SubstitutedArgList.Data, SubstitutedArgList.Count);
-            if (ReturnCode == 0) {
-                for (u64 OutputIndex = 0; OutputIndex < Target->Output.Count; OutputIndex += 1) {
-                    target *Output = Target->Output.Data[OutputIndex];
-                    assert(Output->Path.Length);
-                    os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
-                    if (!FileInfo.Exists) {
-                        PushError("File '%.*s' does not exist after build command\n", Target->Path);
-                        ReturnCode = 1;
-                        Error = true;
-                    }
-                    Output->FileInfo = FileInfo;
+        }
+        if (Target->CommandProc) {
+            ReturnCode = Target->CommandProc(Target);
+        }
+
+        if (ReturnCode == 0) {
+            for (u64 OutputIndex = 0; OutputIndex < Target->Output.Count; OutputIndex += 1) {
+                target *Output = Target->Output.Data[OutputIndex];
+                assert(Output->Path.Length);
+                os_file_info FileInfo = OS_GetFileInfo(ProjectPath(Output->Path));
+                if (!FileInfo.Exists) {
+                    PushError("File '%.*s' does not exist after build command\n", Target->Path);
+                    ReturnCode = 1;
                 }
+                Output->FileInfo = FileInfo;
             }
         }
 
-        if (Error) {
+        if (ReturnCode != 0) {
             break;
         }
     }
